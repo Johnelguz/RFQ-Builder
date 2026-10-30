@@ -20,7 +20,6 @@ export default function SuppliersPage() {
     email: '',
     specialties: ''
   })
-  const [showInactive, setShowInactive] = useState<boolean>(false)
 
   useEffect(() => {
     fetchSuppliers()
@@ -63,27 +62,21 @@ export default function SuppliersPage() {
     }
   }
 
-  async function handleToggleActive(supplier: Supplier) {
-    const nextStatus = !supplier.is_active
-    const actionLabel = nextStatus ? 'reactivate' : 'deactivate'
+  async function handleDeleteSupplier(id: string, companyName: string) {
+    if (!confirm(`Are you sure you want to delete ${companyName}? This will also clean up associated draft batches.`)) return
 
-    if (!confirm(`Are you sure you want to ${actionLabel} ${supplier.company_name}?`)) return
+    // 1. Delete associated RFQ batches first
+    await supabase.from('rfq_batches').delete().eq('supplier_id', id)
 
-    const { error } = await supabase
-      .from('suppliers')
-      .update({ is_active: nextStatus })
-      .eq('id', supplier.id)
+    // 2. Delete the supplier
+    const { error } = await supabase.from('suppliers').delete().eq('id', id)
 
     if (error) {
-      alert(`Error updating supplier: ` + error.message)
+      alert('Delete error: ' + error.message)
     } else {
       fetchSuppliers()
     }
   }
-
-  const displayedSuppliers = showInactive
-    ? suppliers
-    : suppliers.filter(s => s.is_active !== false)
 
   return (
     <div className="max-w-5xl mx-auto p-6 font-sans">
@@ -154,20 +147,6 @@ export default function SuppliersPage() {
         </form>
       </div>
 
-      {/* Supplier List Header & Filter Toggle */}
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Configured Suppliers</h3>
-        <label className="text-xs text-gray-600 flex items-center gap-2 cursor-pointer font-medium">
-          <input
-            type="checkbox"
-            checked={showInactive}
-            onChange={e => setShowInactive(e.target.checked)}
-            className="h-4 w-4 rounded text-blue-600"
-          />
-          Show Deactivated Vendors ({suppliers.filter(s => !s.is_active).length})
-        </label>
-      </div>
-
       {/* Supplier Directory Table */}
       <div className="bg-white border rounded-lg overflow-hidden shadow-sm">
         <table className="w-full text-left border-collapse">
@@ -177,13 +156,12 @@ export default function SuppliersPage() {
               <th className="p-3">Sales Rep</th>
               <th className="p-3">Email</th>
               <th className="p-3">Specialties</th>
-              <th className="p-3 text-center">Status</th>
               <th className="p-3 text-right">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y text-sm">
-            {displayedSuppliers.map(sup => (
-              <tr key={sup.id} className={`hover:bg-gray-50 ${!sup.is_active ? 'bg-gray-50/60 opacity-75' : ''}`}>
+            {suppliers.map(sup => (
+              <tr key={sup.id} className="hover:bg-gray-50">
                 <td className="p-3 font-semibold text-gray-800">{sup.company_name}</td>
                 <td className="p-3 text-gray-600">{sup.contact_name || '—'}</td>
                 <td className="p-3 font-mono text-xs text-blue-600">{sup.email}</td>
@@ -192,10 +170,26 @@ export default function SuppliersPage() {
                     ? sup.specialties.join(', ')
                     : 'General'}
                 </td>
-                <td className="p-3 text-center">
-                  {sup.is_active ? (
-                    <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold px-2.5 py-0.5 rounded-full">
-                      Active
-                    </span>
-                  ) : (
-                    <span className="bg-gray-100 text-
+                <td className="p-3 text-right">
+                  <button
+                    onClick={() => handleDeleteSupplier(sup.id, sup.company_name)}
+                    className="text-xs bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-3 py-1 rounded font-medium transition-colors"
+                  >
+                    Delete ✕
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {suppliers.length === 0 && (
+              <tr>
+                <td colSpan={5} className="p-6 text-center text-gray-400">
+                  No suppliers found. Use the form above to add your primary vendors.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
