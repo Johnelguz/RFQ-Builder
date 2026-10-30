@@ -33,15 +33,21 @@ interface CatalogItem {
   typical_notes: string
 }
 
+interface Project {
+  id: string
+  name: string
+}
+
 function TakeoffDashboard() {
   const params = useParams()
   const projectId = params?.id as string
   
+  const [project, setProject] = useState<Project | null>(null)
   const [materials, setMaterials] = useState<Material[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([])
   
-  // Track dispatched status purely in local session state (resets on refresh / takeoff clear)
+  // Track dispatched status purely in local session state
   const [dispatchedSupplierIds, setDispatchedSupplierIds] = useState<string[]>([])
   const [showCatalogModal, setShowCatalogModal] = useState<boolean>(false)
   
@@ -59,11 +65,22 @@ function TakeoffDashboard() {
 
   useEffect(() => {
     if (projectId) {
+      fetchProjectDetails()
       fetchMaterials()
       fetchSuppliers()
       fetchCatalog()
     }
   }, [projectId])
+
+  async function fetchProjectDetails() {
+    const { data } = await supabase
+      .from('projects')
+      .select('id, name')
+      .eq('id', projectId)
+      .single()
+    
+    if (data) setProject(data)
+  }
 
   async function fetchMaterials() {
     const { data } = await supabase
@@ -161,7 +178,6 @@ function TakeoffDashboard() {
       alert('Error clearing materials: ' + error.message)
     } else {
       setMaterials([])
-      // Reset dispatch status tracking whenever the takeoff is cleared
       setDispatchedSupplierIds([])
     }
   }
@@ -216,9 +232,11 @@ function TakeoffDashboard() {
       return
     }
 
-    const subjectLine = `Request for Quote (RFQ): Material Package - Project Order`
+    // Dynamic subject line incorporating project name
+    const projectName = project?.name?.trim() ? project.name.trim() : 'Project'
+    const subjectLine = `RFQ for ${projectName}`
 
-    // Log batch record in Supabase in background
+    // Log batch record in Supabase
     const { data: batch, error } = await supabase
       .from('rfq_batches')
       .insert([{
@@ -252,7 +270,9 @@ function TakeoffDashboard() {
     <div className="max-w-7xl mx-auto p-6 font-sans">
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Specialized Material Takeoff & RFQ Builder</h1>
+          <h1 className="text-2xl font-bold text-gray-800">
+            {project?.name ? `Material Takeoff & RFQ Builder — ${project.name}` : 'Specialized Material Takeoff & RFQ Builder'}
+          </h1>
           <a href="/suppliers" className="text-xs text-blue-600 hover:underline font-semibold">
             ⚙️ Manage Suppliers & Sales Reps
           </a>
