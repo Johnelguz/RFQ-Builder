@@ -33,16 +33,14 @@ interface CatalogItem {
   typical_notes: string
 }
 
-interface Project {
-  id: string
-  name: string
-}
-
 function TakeoffDashboard() {
   const params = useParams()
   const projectId = params?.id as string
   
-  const [project, setProject] = useState<Project | null>(null)
+  const [projectName, setProjectName] = useState<string>('Active Project')
+  const [isEditingProjectName, setIsEditingProjectName] = useState<boolean>(false)
+  const [tempProjectName, setTempProjectName] = useState<string>('')
+
   const [materials, setMaterials] = useState<Material[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([])
@@ -74,15 +72,35 @@ function TakeoffDashboard() {
     if (!projectId) return
     const { data } = await supabase
       .from('projects')
-      .select('id, name')
+      .select('name')
       .eq('id', projectId)
       .single()
     
-    if (data) {
-      setProject(data)
+    if (data?.name) {
+      setProjectName(data.name)
+      setTempProjectName(data.name)
     } else {
-      // Fail-safe fallback if project ID isn't in DB yet
-      setProject({ id: projectId, name: 'Active Takeoff Project' })
+      // If project row doesn't exist in DB yet, create it automatically
+      const defaultName = 'Compass Self Storage'
+      setProjectName(defaultName)
+      setTempProjectName(defaultName)
+      await supabase.from('projects').upsert([{ id: projectId, name: defaultName }])
+    }
+  }
+
+  async function handleSaveProjectName(e: React.FormEvent) {
+    e.preventDefault()
+    if (!tempProjectName.trim()) return
+
+    const { error } = await supabase
+      .from('projects')
+      .upsert([{ id: projectId, name: tempProjectName.trim() }])
+
+    if (error) {
+      alert('Error updating project name: ' + error.message)
+    } else {
+      setProjectName(tempProjectName.trim())
+      setIsEditingProjectName(false)
     }
   }
 
@@ -216,7 +234,7 @@ function TakeoffDashboard() {
       : `Hello ${sup.company_name} Team,`
 
     let body = `${greeting}\n\n`
-    body += `Please provide pricing and availability for the following material package:\n\n`
+    body += `Please provide pricing and availability for the following material package (${projectName}):\n\n`
     materials.forEach(item => {
       body += `• Item #${item.item_number}: ${item.quantity} ${item.unit} - ${item.description}`
       if (item.manufacturer || item.model_number) {
@@ -236,7 +254,6 @@ function TakeoffDashboard() {
       return
     }
 
-    const projectName = project?.name?.trim() ? project.name.trim() : 'Project'
     const subjectLine = `RFQ for ${projectName}`
 
     const { data: batch, error } = await supabase
@@ -270,12 +287,36 @@ function TakeoffDashboard() {
     <div className="max-w-7xl mx-auto p-6 font-sans">
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">
-            {project?.name ? `Material Takeoff & RFQ Builder — ${project.name}` : 'Specialized Material Takeoff & RFQ Builder'}
-          </h1>
-          <div className="flex gap-4 mt-1">
-            <a href="/" className="text-xs text-blue-600 hover:underline font-semibold">← Back to Dashboard</a>
-            <a href="/suppliers" className="text-xs text-blue-600 hover:underline font-semibold">⚙️ Manage Suppliers & Sales Reps</a>
+          {/* Project Name Editor */}
+          <div className="flex items-center gap-3">
+            {isEditingProjectName ? (
+              <form onSubmit={handleSaveProjectName} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={tempProjectName}
+                  onChange={e => setTempProjectName(e.target.value)}
+                  className="p-1 border rounded text-lg font-bold text-gray-800 bg-white"
+                  autoFocus
+                />
+                <button type="submit" className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-semibold">Save</button>
+                <button type="button" onClick={() => setIsEditingProjectName(false)} className="text-gray-500 text-xs">Cancel</button>
+              </form>
+            ) : (
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-bold text-gray-800">Takeoff & RFQ: {projectName}</h1>
+                <button
+                  onClick={() => setIsEditingProjectName(true)}
+                  className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded font-semibold transition-colors"
+                >
+                  ✏️ Edit Job Name
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="flex gap-4 mt-2">
+            <a href="/" className="text-xs text-blue-600 hover:underline font-semibold">← Dashboard</a>
+            <a href="/suppliers" className="text-xs text-blue-600 hover:underline font-semibold">⚙️ Suppliers</a>
+            <a href="/history" className="text-xs text-blue-600 hover:underline font-semibold">📁 Sent RFQ History</a>
           </div>
         </div>
         <button 
