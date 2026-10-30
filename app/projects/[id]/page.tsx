@@ -40,6 +40,8 @@ function TakeoffDashboard() {
   const [materials, setMaterials] = useState<Material[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([])
+  
+  // Track dispatched status purely in local session state (resets on refresh / takeoff clear)
   const [dispatchedSupplierIds, setDispatchedSupplierIds] = useState<string[]>([])
   const [showCatalogModal, setShowCatalogModal] = useState<boolean>(false)
   
@@ -60,7 +62,6 @@ function TakeoffDashboard() {
       fetchMaterials()
       fetchSuppliers()
       fetchCatalog()
-      fetchDispatchedBatches()
     }
   }, [projectId])
 
@@ -82,19 +83,6 @@ function TakeoffDashboard() {
   async function fetchCatalog() {
     const { data } = await supabase.from('material_catalog').select('*').order('description', { ascending: true })
     if (data) setCatalogItems(data)
-  }
-
-  // Fetch which suppliers already have an RFQ batch generated for this project
-  async function fetchDispatchedBatches() {
-    const { data } = await supabase
-      .from('rfq_batches')
-      .select('supplier_id')
-      .eq('project_id', projectId)
-
-    if (data) {
-      const supplierIds = Array.from(new Set(data.map(b => b.supplier_id)))
-      setDispatchedSupplierIds(supplierIds)
-    }
   }
 
   async function handleAddMaterial(e: React.FormEvent) {
@@ -173,7 +161,7 @@ function TakeoffDashboard() {
       alert('Error clearing materials: ' + error.message)
     } else {
       setMaterials([])
-      // Also clear batches if takeoff is wiped
+      // Reset dispatch status tracking whenever the takeoff is cleared
       setDispatchedSupplierIds([])
     }
   }
@@ -230,7 +218,7 @@ function TakeoffDashboard() {
 
     const subjectLine = `Request for Quote (RFQ): Material Package - Project Order`
 
-    // Log batch record in Supabase
+    // Log batch record in Supabase in background
     const { data: batch, error } = await supabase
       .from('rfq_batches')
       .insert([{
@@ -248,11 +236,11 @@ function TakeoffDashboard() {
         material_id: item.id
       }))
       await supabase.from('rfq_line_items').insert(rfqLineItems)
-      
-      // Update local state to immediately show the indicator
-      if (!dispatchedSupplierIds.includes(sup.id)) {
-        setDispatchedSupplierIds(prev => [...prev, sup.id])
-      }
+    }
+
+    // Mark as dispatched for current session
+    if (!dispatchedSupplierIds.includes(sup.id)) {
+      setDispatchedSupplierIds(prev => [...prev, sup.id])
     }
 
     // Open Gmail directly with the personalized draft
@@ -383,7 +371,7 @@ function TakeoffDashboard() {
         </div>
       </div>
 
-      {/* Section 3: Clean Streamlined Supplier Dispatch List with Status Indicator */}
+      {/* Section 3: Clean Streamlined Supplier Dispatch List */}
       <div>
         <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">3. Supplier Dispatch ({materials.length} items ready)</h3>
         <div className="bg-white border rounded-lg overflow-hidden shadow-sm">
