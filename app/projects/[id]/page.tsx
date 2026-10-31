@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -42,6 +42,11 @@ function TakeoffDashboard() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([])
   
+  // Autocomplete state
+  const [catalogSearch, setCatalogSearch] = useState<string>('')
+  const [showCatalogDropdown, setShowCatalogDropdown] = useState<boolean>(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
   // Session tracking & Wizard Modal states
   const [dispatchedSupplierIds, setDispatchedSupplierIds] = useState<string[]>([])
   const [showCatalogModal, setShowCatalogModal] = useState<boolean>(false)
@@ -68,6 +73,17 @@ function TakeoffDashboard() {
       fetchCatalog()
     }
   }, [projectId])
+
+  // Close catalog dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowCatalogDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   async function fetchProjectDetails() {
     if (!projectId) return
@@ -100,6 +116,24 @@ function TakeoffDashboard() {
   async function fetchCatalog() {
     const { data } = await supabase.from('material_catalog').select('*').order('description', { ascending: true })
     if (data) setCatalogItems(data)
+  }
+
+  // Filter catalog items for live autocomplete
+  const filteredCatalog = catalogItems.filter(item =>
+    item.description?.toLowerCase().includes(form.description.toLowerCase()) ||
+    item.manufacturer?.toLowerCase().includes(form.description.toLowerCase()) ||
+    item.model_number?.toLowerCase().includes(form.description.toLowerCase())
+  )
+
+  function handleSelectAutocomplete(item: CatalogItem) {
+    setForm(prev => ({
+      ...prev,
+      description: item.description || '',
+      manufacturer: item.manufacturer || '',
+      model_number: item.model_number || '',
+      unit: item.default_unit || prev.unit
+    }))
+    setShowCatalogDropdown(false)
   }
 
   async function handleAddMaterial(e: React.FormEvent) {
@@ -158,6 +192,7 @@ function TakeoffDashboard() {
       alert('Material Insert Error: ' + error.message)
     } else {
       setForm({ quantity: 1, unit: 'EA', description: '', manufacturer: '', model_number: '', sheet_reference: '', notes: '', saveToCatalog: false })
+      setShowCatalogDropdown(false)
       fetchMaterials()
     }
   }
@@ -192,20 +227,6 @@ function TakeoffDashboard() {
     }
   }
 
-  function handleSelectFromCatalog(item: CatalogItem) {
-    setForm({
-      quantity: 1,
-      unit: item.default_unit || 'EA',
-      description: item.description || '',
-      manufacturer: item.manufacturer || '',
-      model_number: item.model_number || '',
-      sheet_reference: '',
-      notes: '',
-      saveToCatalog: false
-    })
-    setShowCatalogModal(false)
-  }
-
   function handleOpenRfqWizard() {
     if (materials.length === 0) {
       alert('Please add at least one material line item to the takeoff before generating an RFQ.')
@@ -222,7 +243,6 @@ function TakeoffDashboard() {
       return
     }
 
-    // Save/update project name in database
     await supabase.from('projects').upsert([{ id: projectId, name: projectName.trim() }])
     setWizardStep('SUPPLIER_LIST')
   }
@@ -250,7 +270,6 @@ function TakeoffDashboard() {
   async function handleOpenSupplierGmail(sup: Supplier) {
     const subjectLine = `RFQ for ${projectName.trim()}`
 
-    // Log batch record in Supabase
     const { data: batch, error } = await supabase
       .from('rfq_batches')
       .insert([{
@@ -270,12 +289,10 @@ function TakeoffDashboard() {
       await supabase.from('rfq_line_items').insert(rfqLineItems)
     }
 
-    // Update local session state
     if (!dispatchedSupplierIds.includes(sup.id)) {
       setDispatchedSupplierIds(prev => [...prev, sup.id])
     }
 
-    // Open Gmail draft
     const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(sup.email)}&su=${encodeURIComponent(subjectLine)}&body=${encodeURIComponent(getEmailBodyText(sup))}`
     window.open(gmailUrl, '_blank')
   }
@@ -310,14 +327,54 @@ function TakeoffDashboard() {
         </button>
       </div>
 
-      {/* Section 1: Add Material Form */}
+      {/* Section 1: Add Material Form with Autocomplete */}
       <div className="mb-8">
         <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">1. Material Entry & Specification</h3>
         <form onSubmit={handleAddMaterial} className="bg-gray-50 p-4 rounded-lg border grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Description / Spec</label>
-            <input type="text" required placeholder="e.g. NEMA 4X Enclosure" value={form.description} onChange={e => setForm({...form, description: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
+          
+          {/* Description input with live catalog search dropdown */}
+          <div className="relative" ref={dropdownRef}>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">
+              Description / Spec <span className="text-gray-400 font-normal">(Search catalog)</span>
+            </label>
+            <input 
+              type="text" 
+              required 
+              placeholder="e.g. ENCLOSURE, NEMA 4X" 
+              value={form.description} 
+              onFocus={() => setShowCatalogDropdown(true)}
+              onChange={e => {
+                setForm({...form, description: e.target.value})
+                setShowCatalogDropdown(true)
+              }} 
+              className="w-full p-2 border rounded text-sm bg-white" 
+            />
+
+            {/* Live Autocomplete Dropdown */}
+            {showCatalogDropdown && form.description.trim().length > 0 && filteredCatalog.length > 0 && (
+              <div className="absolute left-0 right-0 top-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto z-40 divide-y">
+                <div className="p-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 bg-gray-50">
+                  Matching Master Catalog Items
+                </div>
+                {filteredCatalog.map(item => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleSelectAutocomplete(item)}
+                    className="w-full text-left p-2.5 hover:bg-blue-50 transition-colors flex flex-col gap-0.5"
+                  >
+                    <div className="text-xs font-bold text-gray-800">{item.description}</div>
+                    <div className="text-[11px] text-gray-500">
+                      {item.manufacturer && <span>{item.manufacturer} </span>}
+                      {item.model_number && <span className="font-mono bg-gray-100 px-1 rounded">{item.model_number}</span>}
+                      <span className="ml-2 font-semibold text-blue-600">[{item.default_unit || 'EA'}]</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
+
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1">Manufacturer</label>
             <input type="text" placeholder="e.g. Hoffman / Cooper" value={form.manufacturer} onChange={e => setForm({...form, manufacturer: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
@@ -591,7 +648,7 @@ function TakeoffDashboard() {
                   </div>
                   <div className="flex items-center gap-2">
                     <button 
-                      onClick={() => handleSelectFromCatalog(cat)}
+                      onClick={() => handleSelectAutocomplete(cat)}
                       className="bg-blue-600 text-white text-xs px-3 py-1.5 rounded font-medium hover:bg-blue-700 whitespace-nowrap"
                     >
                       Use in Entry Form ➔
