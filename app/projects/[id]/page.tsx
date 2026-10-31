@@ -43,7 +43,6 @@ function TakeoffDashboard() {
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([])
   
   // Autocomplete state
-  const [catalogSearch, setCatalogSearch] = useState<string>('')
   const [showCatalogDropdown, setShowCatalogDropdown] = useState<boolean>(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -74,7 +73,6 @@ function TakeoffDashboard() {
     }
   }, [projectId])
 
-  // Close catalog dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -118,12 +116,15 @@ function TakeoffDashboard() {
     if (data) setCatalogItems(data)
   }
 
-  // Filter catalog items for live autocomplete
-  const filteredCatalog = catalogItems.filter(item =>
-    item.description?.toLowerCase().includes(form.description.toLowerCase()) ||
-    item.manufacturer?.toLowerCase().includes(form.description.toLowerCase()) ||
-    item.model_number?.toLowerCase().includes(form.description.toLowerCase())
-  )
+  // Case-insensitive catalog filter
+  const filteredCatalog = catalogItems.filter(item => {
+    const query = form.description.toLowerCase()
+    return (
+      item.description?.toLowerCase().includes(query) ||
+      item.manufacturer?.toLowerCase().includes(query) ||
+      item.model_number?.toLowerCase().includes(query)
+    )
+  })
 
   function handleSelectAutocomplete(item: CatalogItem) {
     setForm(prev => ({
@@ -195,6 +196,17 @@ function TakeoffDashboard() {
       setShowCatalogDropdown(false)
       fetchMaterials()
     }
+  }
+
+  // Inline quantity update for Box 2
+  async function handleUpdateQuantity(materialId: string, newQty: number) {
+    if (isNaN(newQty) || newQty <= 0) return
+
+    // Optimistic UI update
+    setMaterials(prev => prev.map(m => m.id === materialId ? { ...m, quantity: newQty } : m))
+
+    // DB update
+    await supabase.from('materials').update({ quantity: newQty }).eq('id', materialId)
   }
 
   async function handleDeleteMaterial(materialId: string) {
@@ -327,20 +339,19 @@ function TakeoffDashboard() {
         </button>
       </div>
 
-      {/* Section 1: Add Material Form with Autocomplete */}
+      {/* Section 1: Add Material Form */}
       <div className="mb-8">
         <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">1. Material Entry & Specification</h3>
         <form onSubmit={handleAddMaterial} className="bg-gray-50 p-4 rounded-lg border grid grid-cols-1 md:grid-cols-4 gap-4">
           
-          {/* Description input with live catalog search dropdown */}
           <div className="relative" ref={dropdownRef}>
             <label className="block text-xs font-semibold text-gray-600 mb-1">
-              Description / Spec <span className="text-gray-400 font-normal">(Search catalog)</span>
+              Description / Spec <span className="text-gray-400 font-normal">(Case-insensitive search)</span>
             </label>
             <input 
               type="text" 
               required 
-              placeholder="e.g. ENCLOSURE, NEMA 4X" 
+              placeholder="e.g. Enclosure / conduit" 
               value={form.description} 
               onFocus={() => setShowCatalogDropdown(true)}
               onChange={e => {
@@ -350,11 +361,10 @@ function TakeoffDashboard() {
               className="w-full p-2 border rounded text-sm bg-white" 
             />
 
-            {/* Live Autocomplete Dropdown */}
             {showCatalogDropdown && form.description.trim().length > 0 && filteredCatalog.length > 0 && (
               <div className="absolute left-0 right-0 top-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto z-40 divide-y">
                 <div className="p-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 bg-gray-50">
-                  Matching Master Catalog Items
+                  Matching Catalog Items
                 </div>
                 {filteredCatalog.map(item => (
                   <button
@@ -417,10 +427,10 @@ function TakeoffDashboard() {
         </form>
       </div>
 
-      {/* Section 2: Material Takeoff Table */}
+      {/* Section 2: Material Takeoff Table with Editable Qty */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">2. Compiled Project Material Takeoff ({materials.length} items)</h3>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">2. Compiled Project Material Takeoff ({materials.length} items) — <span className="text-blue-600">Click qty to edit</span></h3>
           {materials.length > 0 && (
             <button 
               onClick={handleClearAllMaterials}
@@ -435,7 +445,7 @@ function TakeoffDashboard() {
             <thead>
               <tr className="bg-gray-100 border-b text-xs text-gray-700 uppercase">
                 <th className="p-3 w-12">#</th>
-                <th className="p-3">Qty / Unit</th>
+                <th className="p-3">Qty & Unit (Editable)</th>
                 <th className="p-3">Description</th>
                 <th className="p-3">Manufacturer & Model #</th>
                 <th className="p-3">Sheet Ref</th>
@@ -447,7 +457,18 @@ function TakeoffDashboard() {
               {materials.map((item) => (
                 <tr key={item.id} className="hover:bg-gray-50">
                   <td className="p-3 font-medium text-gray-500">{item.item_number}</td>
-                  <td className="p-3 font-semibold">{item.quantity} {item.unit}</td>
+                  <td className="p-3 font-semibold">
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        step="any"
+                        value={item.quantity}
+                        onChange={e => handleUpdateQuantity(item.id, parseFloat(e.target.value))}
+                        className="w-20 p-1 border rounded text-sm font-bold text-gray-800 bg-white focus:bg-blue-50"
+                      />
+                      <span className="text-xs text-gray-600 uppercase">{item.unit}</span>
+                    </div>
+                  </td>
                   <td className="p-3">{item.description}</td>
                   <td className="p-3 text-gray-600">{item.manufacturer} <span className="font-mono text-xs bg-gray-100 px-1 rounded">{item.model_number}</span></td>
                   <td className="p-3"><span className="bg-blue-50 text-blue-700 text-xs px-2 py-1 rounded font-medium">{item.sheet_reference}</span></td>
@@ -472,7 +493,6 @@ function TakeoffDashboard() {
           </table>
         </div>
 
-        {/* Big Generate RFQ Button */}
         {materials.length > 0 && (
           <div className="mt-4 flex justify-end">
             <button
@@ -490,7 +510,6 @@ function TakeoffDashboard() {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl max-w-2xl w-full p-6 shadow-2xl flex flex-col">
             
-            {/* Step 1: Project / Job Name Prompt */}
             {wizardStep === 'PROJECT_NAME' && (
               <div>
                 <div className="flex justify-between items-center mb-4 pb-2 border-b">
@@ -538,7 +557,6 @@ function TakeoffDashboard() {
               </div>
             )}
 
-            {/* Step 2: Supplier Selection & Dispatch List */}
             {wizardStep === 'SUPPLIER_LIST' && (
               <div>
                 <div className="flex justify-between items-center mb-4 pb-2 border-b">
@@ -596,7 +614,6 @@ function TakeoffDashboard() {
                   </table>
                 </div>
 
-                {/* Footer Controls: Return vs Reset */}
                 <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-3 border-t">
                   <button
                     onClick={handleResetTakeoffAndClose}
