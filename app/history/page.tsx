@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 
 interface RFQHistoryItem {
   id: string
+  project_id: string
   created_at: string
   subject: string
   status: string
@@ -44,6 +45,7 @@ export default function RFQHistoryPage() {
       .from('rfq_batches')
       .select(`
         id,
+        project_id,
         created_at,
         subject,
         status,
@@ -72,13 +74,50 @@ export default function RFQHistoryPage() {
     setLoading(false)
   }
 
+  async function handleReloadBatchIntoProject(batch: RFQHistoryItem) {
+    if (!batch.project_id) {
+      alert('Project ID not found for this history record.')
+      return
+    }
+
+    if (!confirm(`Load all items from "${batch.projects?.name || 'this order'}" into the active takeoff? This will add them to the project list.`)) return
+
+    // Extract materials from the batch line items
+    const materialsToAdd = batch.rfq_line_items
+      ?.map(li => li.materials)
+      .filter(Boolean)
+
+    if (!materialsToAdd || materialsToAdd.length === 0) {
+      alert('No itemized materials found in this history record.')
+      return
+    }
+
+    // Insert items into the project's active materials table
+    let successCount = 0
+    for (const mat of materialsToAdd) {
+      if (!mat) continue
+      const { error } = await supabase.from('materials').insert([{
+        project_id: batch.project_id,
+        quantity: mat.quantity,
+        unit: mat.unit || 'EA',
+        description: mat.description,
+        manufacturer: mat.manufacturer || '',
+        model_number: mat.model_number || '',
+        sheet_reference: mat.sheet_reference || '',
+        notes: mat.notes || '',
+        item_number: successCount + 1
+      }])
+      if (!error) successCount++
+    }
+
+    alert(`Successfully loaded ${successCount} items into the project takeoff!`)
+    window.location.href = `/projects/${batch.project_id}`
+  }
+
   async function handleDeleteBatch(batchId: string) {
     if (!confirm('Are you sure you want to delete this RFQ record?')) return
 
-    // Delete associated line items first due to foreign keys
     await supabase.from('rfq_line_items').delete().eq('rfq_batch_id', batchId)
-    
-    // Delete the batch record
     const { error } = await supabase.from('rfq_batches').delete().eq('id', batchId)
 
     if (error) {
@@ -91,7 +130,6 @@ export default function RFQHistoryPage() {
   async function handleClearAllHistory() {
     if (!confirm('Are you sure you want to clear ALL RFQ history records? This is ideal for cleaning up as jobs close out.')) return
 
-    // Delete all line items and batches
     const { error: lineError } = await supabase.from('rfq_line_items').delete().neq('id', '00000000-0000-0000-0000-000000000000')
     const { error: batchError } = await supabase.from('rfq_batches').delete().neq('id', '00000000-0000-0000-0000-000000000000')
 
@@ -107,7 +145,7 @@ export default function RFQHistoryPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Sent RFQ History & Records</h1>
-          <p className="text-xs text-gray-500 mt-1">Review dispatched material packages, suppliers, reps, and dates. Clear records as jobs close out.</p>
+          <p className="text-xs text-gray-500 mt-1">Review dispatched material packages, reload past orders for resending, and clear records as jobs close.</p>
         </div>
         <div className="flex items-center gap-3">
           {history.length > 0 && (
@@ -150,9 +188,13 @@ export default function RFQHistoryPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold px-2.5 py-1 rounded-full">
-                      ✓ Dispatched
-                    </span>
+                    <button
+                      onClick={() => handleReloadBatchIntoProject(batch)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors shadow-xs"
+                      title="Load these items back into the active takeoff list"
+                    >
+                      🔄 Load into Active Takeoff ➔
+                    </button>
                     <button
                       onClick={() => handleDeleteBatch(batch.id)}
                       className="text-xs text-gray-400 hover:text-red-600 font-bold p-1 transition-colors"
@@ -163,7 +205,6 @@ export default function RFQHistoryPage() {
                   </div>
                 </div>
 
-                {/* Itemized Material Table for this RFQ */}
                 <div>
                   <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Itemized Material Package ({batch.rfq_line_items?.length || 0} items)</h4>
                   <div className="border rounded bg-gray-50 overflow-hidden">
