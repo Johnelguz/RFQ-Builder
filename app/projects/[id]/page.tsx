@@ -37,17 +37,18 @@ function TakeoffDashboard() {
   const params = useParams()
   const projectId = params?.id as string
   
-  const [projectName, setProjectName] = useState<string>('Active Project')
-  const [isEditingProjectName, setIsEditingProjectName] = useState<boolean>(false)
-  const [tempProjectName, setTempProjectName] = useState<string>('')
-
+  const [projectName, setProjectName] = useState<string>('')
   const [materials, setMaterials] = useState<Material[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([])
   
+  // Session tracking & Wizard Modal states
   const [dispatchedSupplierIds, setDispatchedSupplierIds] = useState<string[]>([])
   const [showCatalogModal, setShowCatalogModal] = useState<boolean>(false)
+  const [showRfqWizard, setShowRfqWizard] = useState<boolean>(false)
+  const [wizardStep, setWizardStep] = useState<'PROJECT_NAME' | 'SUPPLIER_LIST'>('PROJECT_NAME')
   
+  // Material Entry Form state
   const [form, setForm] = useState({
     quantity: 1,
     unit: 'EA',
@@ -78,29 +79,6 @@ function TakeoffDashboard() {
     
     if (data?.name) {
       setProjectName(data.name)
-      setTempProjectName(data.name)
-    } else {
-      // If project row doesn't exist in DB yet, create it automatically
-      const defaultName = 'Compass Self Storage'
-      setProjectName(defaultName)
-      setTempProjectName(defaultName)
-      await supabase.from('projects').upsert([{ id: projectId, name: defaultName }])
-    }
-  }
-
-  async function handleSaveProjectName(e: React.FormEvent) {
-    e.preventDefault()
-    if (!tempProjectName.trim()) return
-
-    const { error } = await supabase
-      .from('projects')
-      .upsert([{ id: projectId, name: tempProjectName.trim() }])
-
-    if (error) {
-      alert('Error updating project name: ' + error.message)
-    } else {
-      setProjectName(tempProjectName.trim())
-      setIsEditingProjectName(false)
     }
   }
 
@@ -228,6 +206,27 @@ function TakeoffDashboard() {
     setShowCatalogModal(false)
   }
 
+  function handleOpenRfqWizard() {
+    if (materials.length === 0) {
+      alert('Please add at least one material line item to the takeoff before generating an RFQ.')
+      return
+    }
+    setWizardStep('PROJECT_NAME')
+    setShowRfqWizard(true)
+  }
+
+  async function handleProceedToSuppliers(e: React.FormEvent) {
+    e.preventDefault()
+    if (!projectName.trim()) {
+      alert('Please enter a project or job name for the subject line.')
+      return
+    }
+
+    // Save/update project name in database
+    await supabase.from('projects').upsert([{ id: projectId, name: projectName.trim() }])
+    setWizardStep('SUPPLIER_LIST')
+  }
+
   function getEmailBodyText(sup: Supplier) {
     const greeting = sup.contact_name?.trim()
       ? `Hello ${sup.contact_name},`
@@ -249,13 +248,9 @@ function TakeoffDashboard() {
   }
 
   async function handleOpenSupplierGmail(sup: Supplier) {
-    if (materials.length === 0) {
-      alert('Please add at least one material line item to the takeoff before dispatching an RFQ.')
-      return
-    }
+    const subjectLine = `RFQ for ${projectName.trim()}`
 
-    const subjectLine = `RFQ for ${projectName}`
-
+    // Log batch record in Supabase
     const { data: batch, error } = await supabase
       .from('rfq_batches')
       .insert([{
@@ -275,44 +270,32 @@ function TakeoffDashboard() {
       await supabase.from('rfq_line_items').insert(rfqLineItems)
     }
 
+    // Update local session state
     if (!dispatchedSupplierIds.includes(sup.id)) {
       setDispatchedSupplierIds(prev => [...prev, sup.id])
     }
 
+    // Open Gmail draft
     const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(sup.email)}&su=${encodeURIComponent(subjectLine)}&body=${encodeURIComponent(getEmailBodyText(sup))}`
     window.open(gmailUrl, '_blank')
+  }
+
+  async function handleResetTakeoffAndClose() {
+    if (confirm('Are you sure you want to clear the entire takeoff list and start a fresh order?')) {
+      await supabase.from('materials').delete().eq('project_id', projectId)
+      setMaterials([])
+      setDispatchedSupplierIds([])
+      setShowRfqWizard(false)
+    }
   }
 
   return (
     <div className="max-w-7xl mx-auto p-6 font-sans">
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
         <div>
-          {/* Project Name Editor */}
-          <div className="flex items-center gap-3">
-            {isEditingProjectName ? (
-              <form onSubmit={handleSaveProjectName} className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={tempProjectName}
-                  onChange={e => setTempProjectName(e.target.value)}
-                  className="p-1 border rounded text-lg font-bold text-gray-800 bg-white"
-                  autoFocus
-                />
-                <button type="submit" className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-semibold">Save</button>
-                <button type="button" onClick={() => setIsEditingProjectName(false)} className="text-gray-500 text-xs">Cancel</button>
-              </form>
-            ) : (
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-bold text-gray-800">Takeoff & RFQ: {projectName}</h1>
-                <button
-                  onClick={() => setIsEditingProjectName(true)}
-                  className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded font-semibold transition-colors"
-                >
-                  ✏️ Edit Job Name
-                </button>
-              </div>
-            )}
-          </div>
+          <h1 className="text-2xl font-bold text-gray-800">
+            Electrical Material Takeoff & RFQ Dispatch
+          </h1>
           <div className="flex gap-4 mt-2">
             <a href="/" className="text-xs text-blue-600 hover:underline font-semibold">← Dashboard</a>
             <a href="/suppliers" className="text-xs text-blue-600 hover:underline font-semibold">⚙️ Suppliers</a>
@@ -323,7 +306,7 @@ function TakeoffDashboard() {
           onClick={() => setShowCatalogModal(true)}
           className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 shadow-sm flex items-center justify-center gap-2"
         >
-          📂 Browse Master Catalog ({catalogItems.length})
+          📂 Master Catalog ({catalogItems.length})
         </button>
       </div>
 
@@ -380,13 +363,13 @@ function TakeoffDashboard() {
       {/* Section 2: Material Takeoff Table */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">2. Compiled Project Material Takeoff</h3>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">2. Compiled Project Material Takeoff ({materials.length} items)</h3>
           {materials.length > 0 && (
             <button 
               onClick={handleClearAllMaterials}
               className="text-xs font-semibold text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded transition-colors"
             >
-              Clear Entire Takeoff ✕
+              Clear Takeoff ✕
             </button>
           )}
         </div>
@@ -431,63 +414,161 @@ function TakeoffDashboard() {
             </tbody>
           </table>
         </div>
+
+        {/* Big Generate RFQ Button */}
+        {materials.length > 0 && (
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={handleOpenRfqWizard}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-base px-6 py-3 rounded-lg shadow-md transition-colors flex items-center gap-2"
+            >
+              ✉️ Generate RFQs ({materials.length} Line Items) ➔
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Section 3: Clean Streamlined Supplier Dispatch List */}
-      <div>
-        <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">3. Supplier Dispatch ({materials.length} items ready)</h3>
-        <div className="bg-white border rounded-lg overflow-hidden shadow-sm">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-gray-100 border-b text-xs text-gray-700 uppercase">
-                <th className="p-3">Company</th>
-                <th className="p-3">Email</th>
-                <th className="p-3 text-center">Status</th>
-                <th className="p-3 text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y text-sm">
-              {suppliers.map(sup => {
-                const isDispatched = dispatchedSupplierIds.includes(sup.id)
-                return (
-                  <tr key={sup.id} className="hover:bg-gray-50">
-                    <td className="p-3 font-semibold text-gray-800">
-                      {sup.company_name}
-                    </td>
-                    <td className="p-3 font-mono text-xs text-blue-600">
-                      {sup.email}
-                    </td>
-                    <td className="p-3 text-center">
-                      {isDispatched ? (
-                        <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold px-2.5 py-1 rounded-full inline-flex items-center gap-1">
-                          ✓ RFQ Dispatched
-                        </span>
-                      ) : (
-                        <span className="text-gray-400 text-xs">Pending</span>
+      {/* RFQ Dispatch Wizard Modal */}
+      {showRfqWizard && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-2xl w-full p-6 shadow-2xl flex flex-col">
+            
+            {/* Step 1: Project / Job Name Prompt */}
+            {wizardStep === 'PROJECT_NAME' && (
+              <div>
+                <div className="flex justify-between items-center mb-4 pb-2 border-b">
+                  <h2 className="text-lg font-bold text-gray-800">Step 1: Set Job / Project Name</h2>
+                  <button onClick={() => setShowRfqWizard(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg">✕</button>
+                </div>
+                <p className="text-xs text-gray-600 mb-4">
+                  Please enter or confirm the Project / Job Name below. This will automatically be used in the email subject line (<strong>RFQ for [Project Name]</strong>) for all vendor emails.
+                </p>
+                
+                <form onSubmit={handleProceedToSuppliers} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Project / Job Name</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Compass Self Storage / Newark Airport Terminal A"
+                      value={projectName}
+                      onChange={e => setProjectName(e.target.value)}
+                      className="w-full p-3 border rounded-lg text-base font-semibold bg-gray-50 focus:bg-white"
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+                    <strong>Preview Subject Line:</strong> <span className="font-mono">RFQ for {projectName.trim() || '[Project Name]'}</span>
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowRfqWizard(false)}
+                      className="px-4 py-2 rounded text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 font-medium"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 rounded text-sm text-white bg-blue-600 hover:bg-blue-700 font-semibold shadow-xs"
+                    >
+                      Continue to Suppliers ➔
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {/* Step 2: Supplier Selection & Dispatch List */}
+            {wizardStep === 'SUPPLIER_LIST' && (
+              <div>
+                <div className="flex justify-between items-center mb-4 pb-2 border-b">
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-800">Step 2: Dispatch RFQs to Vendors</h2>
+                    <p className="text-xs text-gray-500 font-medium">Job: <span className="text-blue-600">{projectName}</span> ({materials.length} line items)</p>
+                  </div>
+                  <button onClick={() => setShowRfqWizard(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg">✕</button>
+                </div>
+
+                <div className="border rounded-lg overflow-hidden divide-y max-h-[50vh] overflow-y-auto mb-4">
+                  <table className="w-full text-left border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-gray-100 text-xs text-gray-700 uppercase">
+                        <th className="p-3">Supplier</th>
+                        <th className="p-3 text-center">Status</th>
+                        <th className="p-3 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {suppliers.map(sup => {
+                        const isDispatched = dispatchedSupplierIds.includes(sup.id)
+                        return (
+                          <tr key={sup.id} className="hover:bg-gray-50">
+                            <td className="p-3">
+                              <div className="font-semibold text-gray-800">{sup.company_name}</div>
+                              <div className="text-xs text-gray-500">{sup.contact_name || 'General Rep'} • <span className="font-mono text-blue-600">{sup.email}</span></div>
+                            </td>
+                            <td className="p-3 text-center">
+                              {isDispatched ? (
+                                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold px-2.5 py-1 rounded-full inline-flex items-center gap-1">
+                                  ✓ RFQ Dispatched
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 text-xs">Pending</span>
+                              )}
+                            </td>
+                            <td className="p-3 text-right">
+                              <button
+                                onClick={() => handleOpenSupplierGmail(sup)}
+                                className={`text-xs px-3.5 py-1.5 rounded font-medium transition-colors shadow-xs inline-flex items-center gap-1.5 ${isDispatched ? 'bg-gray-700 hover:bg-gray-800 text-white' : 'bg-red-600 hover:bg-red-700 text-white'}`}
+                              >
+                                ✉️ {isDispatched ? 'Open Again' : 'Open Gmail Draft'}
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                      {suppliers.length === 0 && (
+                        <tr>
+                          <td colSpan={3} className="p-6 text-center text-gray-400">No active suppliers configured. Add them in the Supplier Directory.</td>
+                        </tr>
                       )}
-                    </td>
-                    <td className="p-3 text-right">
-                      <button
-                        onClick={() => handleOpenSupplierGmail(sup)}
-                        className={`text-xs px-3.5 py-1.5 rounded font-medium transition-colors shadow-xs inline-flex items-center gap-1.5 ${isDispatched ? 'bg-gray-700 hover:bg-gray-800 text-white' : 'bg-red-600 hover:bg-red-700 text-white'}`}
-                      >
-                        ✉️ {isDispatched ? 'Open Again' : 'Open Gmail Draft'}
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-              {suppliers.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="p-6 text-center text-gray-400">
-                    No suppliers configured yet. <a href="/suppliers" className="text-blue-600 underline">Add suppliers here</a>.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Footer Controls: Return vs Reset */}
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-3 border-t">
+                  <button
+                    onClick={handleResetTakeoffAndClose}
+                    className="text-xs text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 px-3 py-2 rounded font-semibold transition-colors"
+                  >
+                    Clear Takeoff & Start New Quote ✕
+                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setWizardStep('PROJECT_NAME')}
+                      className="px-3 py-2 rounded text-xs text-gray-600 bg-gray-100 hover:bg-gray-200 font-semibold"
+                    >
+                      ← Back to Job Name
+                    </button>
+                    <button
+                      onClick={() => setShowRfqWizard(false)}
+                      className="px-4 py-2 rounded text-xs text-white bg-blue-600 hover:bg-blue-700 font-semibold"
+                    >
+                      Done / Return to Takeoff
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Master Catalog Modal */}
       {showCatalogModal && (
