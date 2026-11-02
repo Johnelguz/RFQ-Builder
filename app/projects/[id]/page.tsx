@@ -1,3 +1,4 @@
+/* VERSION: v2.1.1 START */
 'use client'
 
 import { useState, useEffect, useRef, Suspense } from 'react'
@@ -46,13 +47,16 @@ function TakeoffDashboard() {
   const [showCatalogDropdown, setShowCatalogDropdown] = useState<boolean>(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
+  // Notification bubble state for automatic catalog additions
+  const [catalogToast, setCatalogToast] = useState<string | null>(null)
+
   // Session tracking & Wizard Modal states
   const [dispatchedSupplierIds, setDispatchedSupplierIds] = useState<string[]>([])
   const [showCatalogModal, setShowCatalogModal] = useState<boolean>(false)
   const [showRfqWizard, setShowRfqWizard] = useState<boolean>(false)
   const [wizardStep, setWizardStep] = useState<'PROJECT_NAME' | 'SUPPLIER_LIST'>('PROJECT_NAME')
   
-  // Material Entry Form state
+  // Material Entry Form state (Checkbox removed)
   const [form, setForm] = useState({
     quantity: 1,
     unit: 'EA',
@@ -60,8 +64,7 @@ function TakeoffDashboard() {
     manufacturer: '',
     model_number: '',
     sheet_reference: '',
-    notes: '',
-    saveToCatalog: false
+    notes: ''
   })
 
   useEffect(() => {
@@ -140,38 +143,41 @@ function TakeoffDashboard() {
   async function handleAddMaterial(e: React.FormEvent) {
     e.preventDefault()
 
+    const trimmedDesc = form.description.trim()
     let catalogItemId = null
-    if (form.saveToCatalog) {
-      const existingCatalogItem = catalogItems.find(
-        c => c.description?.trim().toLowerCase() === form.description?.trim().toLowerCase()
-      )
 
-      if (existingCatalogItem) {
-        catalogItemId = existingCatalogItem.id
-        await supabase
-          .from('material_catalog')
-          .update({ default_unit: form.unit, manufacturer: form.manufacturer, model_number: form.model_number })
-          .eq('id', existingCatalogItem.id)
-      } else {
-        const { data: catalogData, error: catalogError } = await supabase
-          .from('material_catalog')
-          .insert([{
-            description: form.description,
-            manufacturer: form.manufacturer,
-            model_number: form.model_number,
-            default_unit: form.unit
-          }])
-          .select()
-          .single()
-        
-        if (catalogError) {
-          alert('Catalog Error: ' + catalogError.message)
-          return
-        }
-        if (catalogData) {
-          catalogItemId = catalogData.id
-          fetchCatalog()
-        }
+    // Check if description already exists in catalog (case-insensitive)
+    const existingCatalogItem = catalogItems.find(
+      c => c.description?.trim().toLowerCase() === trimmedDesc.toLowerCase()
+    )
+
+    if (existingCatalogItem) {
+      // Use existing catalog item ID without re-adding
+      catalogItemId = existingCatalogItem.id
+    } else {
+      // Automatically add new item to Master Catalog
+      const { data: catalogData, error: catalogError } = await supabase
+        .from('material_catalog')
+        .insert([{
+          description: trimmedDesc,
+          manufacturer: form.manufacturer,
+          model_number: form.model_number,
+          default_unit: form.unit
+        }])
+        .select()
+        .single()
+      
+      if (catalogError) {
+        alert('Catalog Error: ' + catalogError.message)
+        return
+      }
+      if (catalogData) {
+        catalogItemId = catalogData.id
+        fetchCatalog()
+
+        // Trigger acknowledgment bubble notification
+        setCatalogToast(`✨ Auto-added "${trimmedDesc}" to Master Catalog`)
+        setTimeout(() => setCatalogToast(null), 4000)
       }
     }
 
@@ -182,7 +188,7 @@ function TakeoffDashboard() {
       item_number: nextItemNumber,
       quantity: form.quantity,
       unit: form.unit,
-      description: form.description,
+      description: trimmedDesc,
       manufacturer: form.manufacturer,
       model_number: form.model_number,
       sheet_reference: form.sheet_reference,
@@ -192,20 +198,15 @@ function TakeoffDashboard() {
     if (error) {
       alert('Material Insert Error: ' + error.message)
     } else {
-      setForm({ quantity: 1, unit: 'EA', description: '', manufacturer: '', model_number: '', sheet_reference: '', notes: '', saveToCatalog: false })
+      setForm({ quantity: 1, unit: 'EA', description: '', manufacturer: '', model_number: '', sheet_reference: '', notes: '' })
       setShowCatalogDropdown(false)
       fetchMaterials()
     }
   }
 
-  // Inline quantity update for Box 2
   async function handleUpdateQuantity(materialId: string, newQty: number) {
     if (isNaN(newQty) || newQty <= 0) return
-
-    // Optimistic UI update
     setMaterials(prev => prev.map(m => m.id === materialId ? { ...m, quantity: newQty } : m))
-
-    // DB update
     await supabase.from('materials').update({ quantity: newQty }).eq('id', materialId)
   }
 
@@ -319,11 +320,19 @@ function TakeoffDashboard() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto p-6 font-sans">
+    <div className="max-w-7xl mx-auto p-6 font-sans relative">
+      
+      {/* Floating Acknowledgment Bubble Toast */}
+      {catalogToast && (
+        <div className="fixed top-6 right-6 z-50 bg-emerald-600 text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-xl flex items-center gap-2">
+          <span>{catalogToast}</span>
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">
-            Electrical Material Takeoff & RFQ Dispatch
+            M Phase RFQ Builder
           </h1>
           <div className="flex gap-4 mt-2">
             <a href="/" className="text-xs text-blue-600 hover:underline font-semibold">← Dashboard</a>
@@ -346,7 +355,7 @@ function TakeoffDashboard() {
           
           <div className="relative" ref={dropdownRef}>
             <label className="block text-xs font-semibold text-gray-600 mb-1">
-              Description / Spec <span className="text-gray-400 font-normal">(Case-insensitive search)</span>
+              Description / Spec <span className="text-gray-400 font-normal">(Auto-adds if new)</span>
             </label>
             <input 
               type="text" 
@@ -417,17 +426,13 @@ function TakeoffDashboard() {
             <label className="block text-xs font-semibold text-gray-600 mb-1">Notes / Specifications</label>
             <input type="text" placeholder="e.g. Stainless steel mounting brackets required" value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
           </div>
-          <div className="flex items-center space-x-2 pt-4">
-            <input type="checkbox" id="catalog" checked={form.saveToCatalog} onChange={e => setForm({...form, saveToCatalog: e.target.checked})} className="h-4 w-4" />
-            <label htmlFor="catalog" className="text-xs font-medium text-gray-700">Save to Master Catalog for future projects</label>
-          </div>
-          <div className="flex items-end">
-            <button type="submit" className="w-full bg-blue-600 text-white p-2 rounded text-sm font-medium hover:bg-blue-700">Add Line Item</button>
+          <div className="md:col-span-2 flex items-end">
+            <button type="submit" className="w-full bg-blue-600 text-white p-2.5 rounded text-sm font-medium hover:bg-blue-700 shadow-xs">Add Line Item</button>
           </div>
         </form>
       </div>
 
-      {/* Section 2: Material Takeoff Table with Editable Qty */}
+      {/* Section 2: Material Takeoff Table */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">2. Compiled Project Material Takeoff ({materials.length} items) — <span className="text-blue-600">Click qty to edit</span></h3>
@@ -681,7 +686,7 @@ function TakeoffDashboard() {
                 </div>
               ))}
               {catalogItems.length === 0 && (
-                <div className="p-8 text-center text-gray-400 text-sm">No items saved in the master catalog yet. Check "Save to Master Catalog" when adding items!</div>
+                <div className="p-8 text-center text-gray-400 text-sm">No items saved in the master catalog yet. New items will be added automatically as you enter them!</div>
               )}
             </div>
 
@@ -702,3 +707,4 @@ export default function ProjectTakeoffPage() {
     </Suspense>
   )
 }
+/* VERSION: v2.1.1 END */
