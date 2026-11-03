@@ -323,7 +323,14 @@ function TakeoffDashboard() {
     }
 
     if (!dispatchedSupplierIds.includes(sup.id)) setDispatchedSupplierIds(prev => [...prev, sup.id])
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(sup.email)}&su=${encodeURIComponent(subjectLine)}&body=${encodeURIComponent(getEmailBodyText(sup))}`
+    const emailBody = getEmailBodyText(sup)
+    if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+      const mailtoUrl = `mailto:${sup.email}?subject=${encodeURIComponent(subjectLine)}&body=${encodeURIComponent(emailBody)}`
+      window.location.href = mailtoUrl
+      return
+    }
+
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(sup.email)}&su=${encodeURIComponent(subjectLine)}&body=${encodeURIComponent(emailBody)}`
     window.open(gmailUrl, '_blank')
   }
 
