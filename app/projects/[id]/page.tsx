@@ -67,7 +67,7 @@ function TakeoffDashboard() {
     notes: ''
   })
 
-  // Wire App Form state (matching your exact wire app HTML script options)
+  // Wire App Form state (matching your exact wire order script options)
   const [wireForm, setWireForm] = useState({
     pullId: '',
     wireSize: '',
@@ -189,7 +189,7 @@ function TakeoffDashboard() {
   // Check if selected wire colors configuration includes green
   const hasGreenWire = wireForm.wireColors.toLowerCase().includes('green')
 
-  // Handle adding a wire pull from your exact Wire App HTML script logic
+  // Handle adding a wire pull from your exact Wire App script logic
   async function handleAddWirePull(e: React.FormEvent) {
     e.preventDefault()
     if (!wireForm.pullId || !wireForm.wireSize || !wireForm.wireType || !wireForm.wireMaterial || !wireForm.wireLength || !wireForm.wireColors) {
@@ -200,15 +200,13 @@ function TakeoffDashboard() {
     const length = parseFloat(wireForm.wireLength)
     const prepString = preparations.length > 0 ? ` [Prep: ${preparations.join(', ')}]` : ''
     
-    // Parse individual color conductors from the selection string (e.g., "3-wire: Black / Red / Blue")
     const colorPart = wireForm.wireColors.includes(':') ? wireForm.wireColors.split(':')[1].trim() : wireForm.wireColors
     const colors = colorPart.split('/').map(c => c.trim())
 
     let currentItemNum = materials.length + 1
 
-    // Add main color conductors
     for (const color of colors) {
-      if (color.toLowerCase() === 'green') continue // Handled separately or below if green size differs
+      if (color.toLowerCase() === 'green') continue
       const desc = `WIRE, ${wireForm.wireSize} ${wireForm.wireType} ${wireForm.wireMaterial} - ${color} (${wireForm.pullId})${prepString}`
       
       await supabase.from('materials').insert([{
@@ -224,7 +222,6 @@ function TakeoffDashboard() {
       }])
     }
 
-    // Add green wire if included or separately specified
     if (hasGreenWire) {
       const gSize = wireForm.greenSize || wireForm.wireSize
       const greenDesc = `WIRE, ${gSize} ${wireForm.wireType} ${wireForm.wireMaterial} - Green Ground (${wireForm.pullId})${prepString}`
@@ -244,7 +241,6 @@ function TakeoffDashboard() {
     setCatalogToast(`⚡ Added Wire Pull "${wireForm.pullId}" (${length} FT) to Takeoff`)
     setTimeout(() => setCatalogToast(null), 4000)
 
-    // Reset wire form
     setWireForm({
       pullId: '',
       wireSize: '',
@@ -547,7 +543,6 @@ function TakeoffDashboard() {
               </div>
             </div>
 
-            {/* Conditionally displayed Green Wire Size selector if color configuration includes green */}
             {hasGreenWire && (
               <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg max-w-sm">
                 <label className="block text-xs font-semibold text-emerald-900 mb-1">Green Wire Size (Optional Override)</label>
@@ -575,7 +570,6 @@ function TakeoffDashboard() {
               </div>
             )}
 
-            {/* Wire Preparation Fieldset Options */}
             <fieldset className="border border-amber-200 p-4 rounded-lg bg-white/60">
               <legend className="text-xs font-bold uppercase text-amber-900 px-2">Wire Preparation Options</legend>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
@@ -767,3 +761,4 @@ export default function ProjectTakeoffPage() {
     </Suspense>
   )
 }
+/* VERSION: v2.5.0 END */
