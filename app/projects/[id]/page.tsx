@@ -1,3 +1,4 @@
+/* VERSION: v2.5.1 START */
 'use client'
 
 import { useState, useEffect, useRef, Suspense } from 'react'
@@ -140,7 +141,6 @@ function TakeoffDashboard() {
     setShowCatalogDropdown(false)
   }
 
-  // Add standard material with auto-catalog addition & notification bubble
   async function handleAddMaterial(e: React.FormEvent) {
     e.preventDefault()
     const trimmedDesc = form.description.trim()
@@ -186,10 +186,8 @@ function TakeoffDashboard() {
     fetchMaterials()
   }
 
-  // Check if selected wire colors configuration includes green
   const hasGreenWire = wireForm.wireColors.toLowerCase().includes('green')
 
-  // Handle adding a wire pull from your exact Wire App script logic
   async function handleAddWirePull(e: React.FormEvent) {
     e.preventDefault()
     if (!wireForm.pullId || !wireForm.wireSize || !wireForm.wireType || !wireForm.wireMaterial || !wireForm.wireLength || !wireForm.wireColors) {
@@ -350,7 +348,10 @@ function TakeoffDashboard() {
 
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">M Phase RFQ Builder</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-800">M Phase RFQ Builder</h1>
+            <span className="bg-amber-100 text-amber-800 text-[10px] font-mono px-2 py-0.5 rounded font-bold">v2.5.1 Active</span>
+          </div>
           <div className="flex gap-4 mt-2">
             <a href="/" className="text-xs text-blue-600 hover:underline font-semibold">← Dashboard</a>
             <a href="/suppliers" className="text-xs text-blue-600 hover:underline font-semibold">⚙️ Suppliers</a>
@@ -761,4 +762,4 @@ export default function ProjectTakeoffPage() {
     </Suspense>
   )
 }
-/* VERSION: v2.5.0 END */
+/* VERSION: v2.5.1 END */
