@@ -1,4 +1,3 @@
-/* VERSION: v2.4.0 START */
 'use client'
 
 import { useState, useEffect, useRef, Suspense } from 'react'
@@ -43,8 +42,10 @@ function TakeoffDashboard() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([])
   
-  // Modal & Tab states
-  const [activeTab, setActiveTab] = useState<'STANDARD' | 'WIRE_BUNDLE'>('STANDARD')
+  // Tab switcher state
+  const [activeTab, setActiveTab] = useState<'STANDARD' | 'WIRE_APP'>('STANDARD')
+  
+  // Standard Form Autocomplete state
   const [showCatalogDropdown, setShowCatalogDropdown] = useState<boolean>(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const [catalogToast, setCatalogToast] = useState<string | null>(null)
@@ -66,19 +67,18 @@ function TakeoffDashboard() {
     notes: ''
   })
 
-  // Wire Feeder Configurator Form state
+  // Wire App Form state (matching your exact wire app HTML script options)
   const [wireForm, setWireForm] = useState({
-    preset: '3-Phase 4-Wire (300 MCM + #3 Ground)',
-    runType: 'PARALLEL', // SINGLE or PARALLEL
-    conduitsCount: 2,
-    phaseSize: '300 MCM',
-    phaseType: 'THHN Copper',
-    neutralSize: '300 MCM',
-    greenSize: '#3 AWG', // Adjustable green wire size
-    lengthFeet: 150,
-    sheetReference: '',
-    notes: 'Main Service Feeder Run'
+    pullId: '',
+    wireSize: '',
+    wireType: '',
+    wireMaterial: '',
+    wireLength: '',
+    wireColors: '',
+    greenWireSize: ''
   })
+
+  const [preparations, setPreparations] = useState<string[]>([])
 
   useEffect(() => {
     if (projectId) {
@@ -140,7 +140,7 @@ function TakeoffDashboard() {
     setShowCatalogDropdown(false)
   }
 
-  // Handle adding standard material with auto-catalog insertion
+  // Add standard material with auto-catalog addition & notification bubble
   async function handleAddMaterial(e: React.FormEvent) {
     e.preventDefault()
     const trimmedDesc = form.description.trim()
@@ -186,36 +186,82 @@ function TakeoffDashboard() {
     fetchMaterials()
   }
 
-  // Handle adding a Wire Bundle / Feeder run (automatically generates multiple line items)
-  async function handleAddWireBundle(e: React.FormEvent) {
-    e.preventDefault()
-    const multiplier = wireForm.runType === 'PARALLEL' ? wireForm.conduitsCount : 1
-    const totalLength = wireForm.lengthFeet * multiplier
+  // Check if selected wire colors configuration includes green
+  const hasGreenWire = wireForm.wireColors.toLowerCase().includes('green')
 
-    const wireLines = [
-      { desc: `WIRE, ${wireForm.phaseSize}, ${wireForm.phaseType} (Phase Conductors)`, qty: totalLength * 3 },
-      { desc: `WIRE, ${wireForm.neutralSize}, ${wireForm.phaseType} (Neutral)`, qty: totalLength },
-      { desc: `WIRE, ${wireForm.greenSize}, COPPER THHN (Ground / Green Wire)`, qty: totalLength }
-    ]
+  // Handle adding a wire pull from your exact Wire App HTML script logic
+  async function handleAddWirePull(e: React.FormEvent) {
+    e.preventDefault()
+    if (!wireForm.pullId || !wireForm.wireSize || !wireForm.wireType || !wireForm.wireMaterial || !wireForm.wireLength || !wireForm.wireColors) {
+      alert('Please fill out all required wire pull fields.')
+      return
+    }
+
+    const length = parseFloat(wireForm.wireLength)
+    const prepString = preparations.length > 0 ? ` [Prep: ${preparations.join(', ')}]` : ''
+    
+    // Parse individual color conductors from the selection string (e.g., "3-wire: Black / Red / Blue")
+    const colorPart = wireForm.wireColors.includes(':') ? wireForm.wireColors.split(':')[1].trim() : wireForm.wireColors
+    const colors = colorPart.split('/').map(c => c.trim())
 
     let currentItemNum = materials.length + 1
-    for (const wl of wireLines) {
+
+    // Add main color conductors
+    for (const color of colors) {
+      if (color.toLowerCase() === 'green') continue // Handled separately or below if green size differs
+      const desc = `WIRE, ${wireForm.wireSize} ${wireForm.wireType} ${wireForm.wireMaterial} - ${color} (${wireForm.pullId})${prepString}`
+      
       await supabase.from('materials').insert([{
         project_id: projectId,
         item_number: currentItemNum++,
-        quantity: wl.qty,
+        quantity: length,
         unit: 'FT',
-        description: wl.desc,
-        manufacturer: 'Standard',
-        model_number: 'THHN',
-        sheet_reference: wireForm.sheetReference,
-        notes: `${wireForm.runType} Run (${wireForm.conduitsCount} Conduits) - ${wireForm.notes}`
+        description: desc,
+        manufacturer: wireForm.wireMaterial,
+        model_number: wireForm.wireType,
+        sheet_reference: wireForm.pullId,
+        notes: `Wire Pull ID: ${wireForm.pullId}${prepString}`
       }])
     }
 
-    setCatalogToast(`⚡ Added Wire Feeder Bundle (${totalLength} FT total conductors)`)
+    // Add green wire if included or separately specified
+    if (hasGreenWire) {
+      const gSize = wireForm.greenSize || wireForm.wireSize
+      const greenDesc = `WIRE, ${gSize} ${wireForm.wireType} ${wireForm.wireMaterial} - Green Ground (${wireForm.pullId})${prepString}`
+      await supabase.from('materials').insert([{
+        project_id: projectId,
+        item_number: currentItemNum++,
+        quantity: length,
+        unit: 'FT',
+        description: greenDesc,
+        manufacturer: wireForm.wireMaterial,
+        model_number: wireForm.wireType,
+        sheet_reference: wireForm.pullId,
+        notes: `Green Ground Wire for Pull ID: ${wireForm.pullId}`
+      }])
+    }
+
+    setCatalogToast(`⚡ Added Wire Pull "${wireForm.pullId}" (${length} FT) to Takeoff`)
     setTimeout(() => setCatalogToast(null), 4000)
+
+    // Reset wire form
+    setWireForm({
+      pullId: '',
+      wireSize: '',
+      wireType: '',
+      wireMaterial: '',
+      wireLength: '',
+      wireColors: '',
+      greenWireSize: ''
+    })
+    setPreparations([])
     fetchMaterials()
+  }
+
+  function handlePrepCheckboxChange(val: string) {
+    setPreparations(prev => 
+      prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val]
+    )
   }
 
   async function handleUpdateQuantity(materialId: string, newQty: number) {
@@ -320,19 +366,19 @@ function TakeoffDashboard() {
         </button>
       </div>
 
-      {/* Section 1: Entry Mode Switcher (Standard vs Wire Feeder Configurator) */}
+      {/* Tab Switcher */}
       <div className="mb-6 flex border-b">
         <button
           onClick={() => setActiveTab('STANDARD')}
           className={`px-4 py-2 text-xs font-bold uppercase border-b-2 transition-colors ${activeTab === 'STANDARD' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
         >
-          📦 Standard Material / Equipment Entry
+          📦 Standard Material Entry
         </button>
         <button
-          onClick={() => setActiveTab('WIRE_BUNDLE')}
-          className={`px-4 py-2 text-xs font-bold uppercase border-b-2 transition-colors ${activeTab === 'WIRE_BUNDLE' ? 'border-amber-600 text-amber-700 bg-amber-50/50' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+          onClick={() => setActiveTab('WIRE_APP')}
+          className={`px-4 py-2 text-xs font-bold uppercase border-b-2 transition-colors ${activeTab === 'WIRE_APP' ? 'border-amber-600 text-amber-700 bg-amber-50/50' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
         >
-          ⚡ Wire Feeder & Parallel Run Configurator
+          ⚡ Wire Order App Integration
         </button>
       </div>
 
@@ -341,7 +387,7 @@ function TakeoffDashboard() {
         <div className="mb-8">
           <form onSubmit={handleAddMaterial} className="bg-gray-50 p-4 rounded-lg border grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="relative" ref={dropdownRef}>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Description / Spec</label>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Description / Spec <span className="text-gray-400">(Auto-adds if new)</span></label>
               <input 
                 type="text" 
                 required 
@@ -397,48 +443,159 @@ function TakeoffDashboard() {
         </div>
       )}
 
-      {/* Tab 2: Wire Feeder & Parallel Run Configurator */}
-      {activeTab === 'WIRE_BUNDLE' && (
+      {/* Tab 2: Wire Order App Form Integration */}
+      {activeTab === 'WIRE_APP' && (
         <div className="mb-8">
-          <form onSubmit={handleAddWireBundle} className="bg-amber-50/50 p-4 rounded-lg border border-amber-200 grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-amber-900 mb-1">Run Structure</label>
-              <select value={wireForm.runType} onChange={e => setWireForm({...wireForm, runType: e.target.value})} className="w-full p-2 border rounded text-sm bg-white">
-                <option value="PARALLEL">Parallel Run</option>
-                <option value="SINGLE">Single Run</option>
-              </select>
+          <form onSubmit={handleAddWirePull} className="bg-amber-50/50 p-6 rounded-lg border border-amber-200 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-amber-900 mb-1">Pull ID</label>
+                <input 
+                  type="text" 
+                  required 
+                  placeholder="e.g., panel 1" 
+                  value={wireForm.pullId} 
+                  onChange={e => setWireForm({...wireForm, pullId: e.target.value})} 
+                  className="w-full p-2 border rounded text-sm bg-white" 
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-amber-900 mb-1">Wire Size</label>
+                <select 
+                  required 
+                  value={wireForm.wireSize} 
+                  onChange={e => setWireForm({...wireForm, wireSize: e.target.value})} 
+                  className="w-full p-2 border rounded text-sm bg-white"
+                >
+                  <option value="">Select Wire Size</option>
+                  <option value="#12">#12</option>
+                  <option value="#10">#10</option>
+                  <option value="#8">#8</option>
+                  <option value="#6">#6</option>
+                  <option value="#4">#4</option>
+                  <option value="#3">#3</option>
+                  <option value="#2">#2</option>
+                  <option value="#1">#1</option>
+                  <option value="1/0">1/0</option>
+                  <option value="2/0">2/0</option>
+                  <option value="3/0">3/0</option>
+                  <option value="4/0">4/0</option>
+                  <option value="250 MCM">250 MCM</option>
+                  <option value="500 MCM">500 MCM</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-amber-900 mb-1">Wire Type</label>
+                <select 
+                  required 
+                  value={wireForm.wireType} 
+                  onChange={e => setWireForm({...wireForm, wireType: e.target.value})} 
+                  className="w-full p-2 border rounded text-sm bg-white"
+                >
+                  <option value="">Select Wire Type</option>
+                  <option value="XHHW-2">XHHW-2</option>
+                  <option value="THHN/THWN-2">THHN/THWN-2</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-amber-900 mb-1">Conductor Material</label>
+                <select 
+                  required 
+                  value={wireForm.wireMaterial} 
+                  onChange={e => setWireForm({...wireForm, wireMaterial: e.target.value})} 
+                  className="w-full p-2 border rounded text-sm bg-white"
+                >
+                  <option value="">Select Conductor Material</option>
+                  <option value="Copper">Copper</option>
+                  <option value="Aluminum">Aluminum</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-amber-900 mb-1">Wire Length (ft)</label>
+                <input 
+                  type="number" 
+                  required 
+                  placeholder="e.g., 150" 
+                  value={wireForm.wireLength} 
+                  onChange={e => setWireForm({...wireForm, wireLength: e.target.value})} 
+                  className="w-full p-2 border rounded text-sm bg-white" 
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-amber-900 mb-1">Wire Colors</label>
+                <select 
+                  required 
+                  value={wireForm.wireColors} 
+                  onChange={e => setWireForm({...wireForm, wireColors: e.target.value})} 
+                  className="w-full p-2 border rounded text-sm bg-white"
+                >
+                  <option value="">Select Color Configuration</option>
+                  <option value="3-wire: Black / Red / Blue">3-wire: Black / Red / Blue</option>
+                  <option value="3-wire: Black / Red / Blue / Green">3-wire: Black / Red / Blue / Green</option>
+                  <option value="3-wire: Brown / Orange / Yellow">3-wire: Brown / Orange / Yellow</option>
+                  <option value="3-wire: Brown / Orange / Yellow / Green">3-wire: Brown / Orange / Yellow / Green</option>
+                  <option value="4-wire: Black / Red / Blue / White">4-wire: Black / Red / Blue / White</option>
+                  <option value="4-wire: Black / Red / Blue / White / Green">4-wire: Black / Red / Blue / White / Green</option>
+                  <option value="4-wire: Brown / Orange / Yellow / Gray">4-wire: Brown / Orange / Yellow / Gray</option>
+                  <option value="4-wire: Brown / Orange / Yellow / Gray / Green">4-wire: Brown / Orange / Yellow / Gray / Green</option>
+                </select>
+              </div>
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-amber-900 mb-1">Conduits / Sets</label>
-              <input type="number" min="1" value={wireForm.conduitsCount} onChange={e => setWireForm({...wireForm, conduitsCount: parseInt(e.target.value)})} className="w-full p-2 border rounded text-sm bg-white" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-amber-900 mb-1">Phase Conductor Size</label>
-              <input type="text" required value={wireForm.phaseSize} onChange={e => setWireForm({...wireForm, phaseSize: e.target.value})} placeholder="e.g. 300 MCM / 500 MCM" className="w-full p-2 border rounded text-sm bg-white" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-amber-900 mb-1">Neutral Size</label>
-              <input type="text" required value={wireForm.neutralSize} onChange={e => setWireForm({...wireForm, neutralSize: e.target.value})} placeholder="e.g. 300 MCM" className="w-full p-2 border rounded text-sm bg-white" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-amber-900 mb-1">Green / Ground Wire Size (Adjustable)</label>
-              <input type="text" required value={wireForm.greenSize} onChange={e => setWireForm({...wireForm, greenSize: e.target.value})} placeholder="e.g. #3 AWG / 1/0 AWG" className="w-full p-2 border rounded text-sm bg-white text-emerald-700 font-bold" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-amber-900 mb-1">Run Length (Feet)</label>
-              <input type="number" step="any" required value={wireForm.lengthFeet} onChange={e => setWireForm({...wireForm, lengthFeet: parseFloat(e.target.value)})} className="w-full p-2 border rounded text-sm bg-white" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-amber-900 mb-1">Sheet Reference</label>
-              <input type="text" value={wireForm.sheetReference} onChange={e => setWireForm({...wireForm, sheetReference: e.target.value})} placeholder="e.g. E-201" className="w-full p-2 border rounded text-sm bg-white" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-amber-900 mb-1">Notes</label>
-              <input type="text" value={wireForm.notes} onChange={e => setWireForm({...wireForm, notes: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
-            </div>
-            <div className="md:col-span-4 flex justify-end">
-              <button type="submit" className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-6 py-2.5 rounded text-sm shadow-sm">
-                ⚡ Add Complete Wire Feeder Bundle to Takeoff
+
+            {/* Conditionally displayed Green Wire Size selector if color configuration includes green */}
+            {hasGreenWire && (
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg max-w-sm">
+                <label className="block text-xs font-semibold text-emerald-900 mb-1">Green Wire Size (Optional Override)</label>
+                <select 
+                  value={wireForm.greenSize} 
+                  onChange={e => setWireForm({...wireForm, greenSize: e.target.value})} 
+                  className="w-full p-2 border rounded text-sm bg-white font-bold text-emerald-700"
+                >
+                  <option value="">Use Same as Main Wire Size</option>
+                  <option value="#12">#12</option>
+                  <option value="#10">#10</option>
+                  <option value="#8">#8</option>
+                  <option value="#6">#6</option>
+                  <option value="#4">#4</option>
+                  <option value="#3">#3</option>
+                  <option value="#2">#2</option>
+                  <option value="#1">#1</option>
+                  <option value="1/0">1/0</option>
+                  <option value="2/0">2/0</option>
+                  <option value="3/0">3/0</option>
+                  <option value="4/0">4/0</option>
+                  <option value="250 MCM">250 MCM</option>
+                  <option value="500 MCM">500 MCM</option>
+                </select>
+              </div>
+            )}
+
+            {/* Wire Preparation Fieldset Options */}
+            <fieldset className="border border-amber-200 p-4 rounded-lg bg-white/60">
+              <legend className="text-xs font-bold uppercase text-amber-900 px-2">Wire Preparation Options</legend>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
+                {['Parallel', 'Individual Spools/Rolls', 'Taped or Colored', 'Colored Only'].map(opt => (
+                  <label key={opt} className="flex items-center space-x-2 text-xs font-medium text-gray-700 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={preparations.includes(opt)} 
+                      onChange={() => handlePrepCheckboxChange(opt)} 
+                      className="h-4 w-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                    />
+                    <span>{opt}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <div className="flex justify-end pt-2">
+              <button type="submit" className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-6 py-2.5 rounded text-sm shadow-sm transition-colors">
+                ⚡ Add Pull to Order Takeoff
               </button>
             </div>
           </form>
@@ -488,7 +645,7 @@ function TakeoffDashboard() {
                 </tr>
               ))}
               {materials.length === 0 && (
-                <tr><td colSpan={7} className="p-6 text-center text-gray-400">No items added yet. Use standard entry or wire bundle configurator above.</td></tr>
+                <tr><td colSpan={7} className="p-6 text-center text-gray-400">No items added yet. Use standard entry or wire order app tab above.</td></tr>
               )}
             </tbody>
           </table>
@@ -610,4 +767,3 @@ export default function ProjectTakeoffPage() {
     </Suspense>
   )
 }
-/* VERSION: v2.4.0 END */
