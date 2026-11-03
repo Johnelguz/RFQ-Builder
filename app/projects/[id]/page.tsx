@@ -1,4 +1,4 @@
-/* VERSION: v2.5.4 START */
+/* Version 2.5.5*/
 'use client'
 
 import { useState, useEffect, useRef, Suspense } from 'react'
@@ -68,7 +68,7 @@ function TakeoffDashboard() {
     notes: ''
   })
 
-  // Wire App Form state (using greenWireSize consistently)
+  // Wire App Form state
   const [wireForm, setWireForm] = useState({
     pullId: '',
     wireSize: '',
@@ -350,7 +350,7 @@ function TakeoffDashboard() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-800">M Phase RFQ Builder</h1>
-            <span className="bg-amber-100 text-amber-800 text-[10px] font-mono px-2 py-0.5 rounded font-bold">v2.5.4 Active</span>
+            <span className="bg-amber-100 text-amber-800 text-[10px] font-mono px-2 py-0.5 rounded font-bold">v2.5.5 Active</span>
           </div>
           <div className="flex gap-4 mt-2">
             <a href="/" className="text-xs text-blue-600 hover:underline font-semibold">← Dashboard</a>
@@ -386,4 +386,364 @@ function TakeoffDashboard() {
             <div className="relative" ref={dropdownRef}>
               <label className="block text-xs font-semibold text-gray-600 mb-1">Description / Spec <span className="text-gray-400">(Auto-adds if new)</span></label>
               <input 
-                type="text"
+                type="text" 
+                required 
+                placeholder="e.g. Enclosure / conduit" 
+                value={form.description} 
+                onFocus={() => setShowCatalogDropdown(true)}
+                onChange={e => { setForm({...form, description: e.target.value}); setShowCatalogDropdown(true) }} 
+                className="w-full p-2 border rounded text-sm bg-white" 
+              />
+              {showCatalogDropdown && form.description.trim().length > 0 && filteredCatalog.length > 0 && (
+                <div className="absolute left-0 right-0 top-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto z-40 divide-y">
+                  {filteredCatalog.map(item => (
+                    <button key={item.id} type="button" onClick={() => handleSelectAutocomplete(item)} className="w-full text-left p-2.5 hover:bg-blue-50 text-xs">
+                      <div className="font-bold text-gray-800">{item.description}</div>
+                      <div className="text-[11px] text-gray-500">{item.manufacturer} <span className="font-mono">{item.model_number}</span></div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Manufacturer</label>
+              <input type="text" placeholder="e.g. Hoffman" value={form.manufacturer} onChange={e => setForm({...form, manufacturer: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Model / Part #</label>
+              <input type="text" placeholder="e.g. JIC-12106" value={form.model_number} onChange={e => setForm({...form, model_number: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Qty</label>
+                <input type="number" step="any" required value={form.quantity} onChange={e => setForm({...form, quantity: parseFloat(e.target.value)})} className="w-full p-2 border rounded text-sm bg-white" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Unit</label>
+                <select value={form.unit} onChange={e => setForm({...form, unit: e.target.value})} className="w-full p-2 border rounded text-sm bg-white">
+                  <option value="EA">EA</option><option value="FT">FT</option><option value="SET">SET</option><option value="LOT">LOT</option><option value="BOX">BOX</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Sheet Reference</label>
+              <input type="text" placeholder="e.g. E-501" value={form.sheet_reference} onChange={e => setForm({...form, sheet_reference: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Notes</label>
+              <input type="text" placeholder="Additional requirements" value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
+            </div>
+            <div className="md:col-span-2 flex items-end">
+              <button type="submit" className="w-full bg-blue-600 text-white p-2.5 rounded text-sm font-medium hover:bg-blue-700">Add Line Item</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Tab 2: Wire Order App Form Integration */}
+      {activeTab === 'WIRE_APP' && (
+        <div className="mb-8">
+          <form onSubmit={handleAddWirePull} className="bg-amber-50/50 p-6 rounded-lg border border-amber-200 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-amber-900 mb-1">Pull ID</label>
+                <input 
+                  type="text" 
+                  required 
+                  placeholder="e.g., panel 1" 
+                  value={wireForm.pullId} 
+                  onChange={e => setWireForm({...wireForm, pullId: e.target.value})} 
+                  className="w-full p-2 border rounded text-sm bg-white" 
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-amber-900 mb-1">Wire Size</label>
+                <select 
+                  required 
+                  value={wireForm.wireSize} 
+                  onChange={e => setWireForm({...wireForm, wireSize: e.target.value})} 
+                  className="w-full p-2 border rounded text-sm bg-white"
+                >
+                  <option value="">Select Wire Size</option>
+                  <option value="#12">#12</option>
+                  <option value="#10">#10</option>
+                  <option value="#8">#8</option>
+                  <option value="#6">#6</option>
+                  <option value="#4">#4</option>
+                  <option value="#3">#3</option>
+                  <option value="#2">#2</option>
+                  <option value="#1">#1</option>
+                  <option value="1/0">1/0</option>
+                  <option value="2/0">2/0</option>
+                  <option value="3/0">3/0</option>
+                  <option value="4/0">4/0</option>
+                  <option value="250 MCM">250 MCM</option>
+                  <option value="500 MCM">500 MCM</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-amber-900 mb-1">Wire Type</label>
+                <select 
+                  required 
+                  value={wireForm.wireType} 
+                  onChange={e => setWireForm({...wireForm, wireType: e.target.value})} 
+                  className="w-full p-2 border rounded text-sm bg-white"
+                >
+                  <option value="">Select Wire Type</option>
+                  <option value="XHHW-2">XHHW-2</option>
+                  <option value="THHN/THWN-2">THHN/THWN-2</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-amber-900 mb-1">Conductor Material</label>
+                <select 
+                  required 
+                  value={wireForm.wireMaterial} 
+                  onChange={e => setWireForm({...wireForm, wireMaterial: e.target.value})} 
+                  className="w-full p-2 border rounded text-sm bg-white"
+                >
+                  <option value="">Select Conductor Material</option>
+                  <option value="Copper">Copper</option>
+                  <option value="Aluminum">Aluminum</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-amber-900 mb-1">Wire Length (ft)</label>
+                <input 
+                  type="number" 
+                  required 
+                  placeholder="e.g., 150" 
+                  value={wireForm.wireLength} 
+                  onChange={e => setWireForm({...wireForm, wireLength: e.target.value})} 
+                  className="w-full p-2 border rounded text-sm bg-white" 
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-amber-900 mb-1">Wire Colors</label>
+                <select 
+                  required 
+                  value={wireForm.wireColors} 
+                  onChange={e => setWireForm({...wireForm, wireColors: e.target.value})} 
+                  className="w-full p-2 border rounded text-sm bg-white"
+                >
+                  <option value="">Select Color Configuration</option>
+                  <option value="3-wire: Black / Red / Blue">3-wire: Black / Red / Blue</option>
+                  <option value="3-wire: Black / Red / Blue / Green">3-wire: Black / Red / Blue / Green</option>
+                  <option value="3-wire: Brown / Orange / Yellow">3-wire: Brown / Orange / Yellow</option>
+                  <option value="3-wire: Brown / Orange / Yellow / Green">3-wire: Brown / Orange / Yellow / Green</option>
+                  <option value="4-wire: Black / Red / Blue / White">4-wire: Black / Red / Blue / White</option>
+                  <option value="4-wire: Black / Red / Blue / White / Green">4-wire: Black / Red / Blue / White / Green</option>
+                  <option value="4-wire: Brown / Orange / Yellow / Gray">4-wire: Brown / Orange / Yellow / Gray</option>
+                  <option value="4-wire: Brown / Orange / Yellow / Gray / Green">4-wire: Brown / Orange / Yellow / Gray / Green</option>
+                </select>
+              </div>
+            </div>
+
+            {hasGreenWire && (
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg max-w-sm">
+                <label className="block text-xs font-semibold text-emerald-900 mb-1">Green Wire Size (Optional Override)</label>
+                <select 
+                  value={wireForm.greenWireSize} 
+                  onChange={e => setWireForm({...wireForm, greenWireSize: e.target.value})} 
+                  className="w-full p-2 border rounded text-sm bg-white font-bold text-emerald-700"
+                >
+                  <option value="">Use Same as Main Wire Size</option>
+                  <option value="#12">#12</option>
+                  <option value="#10">#10</option>
+                  <option value="#8">#8</option>
+                  <option value="#6">#6</option>
+                  <option value="#4">#4</option>
+                  <option value="#3">#3</option>
+                  <option value="#2">#2</option>
+                  <option value="#1">#1</option>
+                  <option value="1/0">1/0</option>
+                  <option value="2/0">2/0</option>
+                  <option value="3/0">3/0</option>
+                  <option value="4/0">4/0</option>
+                  <option value="250 MCM">250 MCM</option>
+                  <option value="500 MCM">500 MCM</option>
+                </select>
+              </div>
+            )}
+
+            <fieldset className="border border-amber-200 p-4 rounded-lg bg-white/60">
+              <legend className="text-xs font-bold uppercase text-amber-900 px-2">Wire Preparation Options</legend>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
+                {['Parallel', 'Individual Spools/Rolls', 'Taped or Colored', 'Colored Only'].map(opt => (
+                  <label key={opt} className="flex items-center space-x-2 text-xs font-medium text-gray-700 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={preparations.includes(opt)} 
+                      onChange={() => handlePrepCheckboxChange(opt)} 
+                      className="h-4 w-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                    />
+                    <span>{opt}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <div className="flex justify-end pt-2">
+              <button type="submit" className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-6 py-2.5 rounded text-sm shadow-sm transition-colors">
+                ⚡ Add Pull to Order Takeoff
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Section 2: Compiled Takeoff Table */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">2. Compiled Project Material Takeoff ({materials.length} items)</h3>
+          {materials.length > 0 && (
+            <button onClick={handleClearAllMaterials} className="text-xs font-semibold text-red-600 hover:text-red-800 bg-red-50 px-2.5 py-1 rounded">
+              Clear Takeoff ✕
+            </button>
+          )}
+        </div>
+        <div className="bg-white border rounded-lg overflow-hidden shadow-sm">
+          <table className="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr className="bg-gray-100 border-b text-xs text-gray-700 uppercase">
+                <th className="p-3 w-12">#</th>
+                <th className="p-3">Qty & Unit (Editable)</th>
+                <th className="p-3">Description</th>
+                <th className="p-3">Manufacturer & Model #</th>
+                <th className="p-3">Sheet Ref</th>
+                <th className="p-3">Notes</th>
+                <th className="p-3 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {materials.map((item) => (
+                <tr key={item.id} className="hover:bg-gray-50">
+                  <td className="p-3 font-medium text-gray-500">{item.item_number}</td>
+                  <td className="p-3 font-semibold">
+                    <div className="flex items-center gap-1.5">
+                      <input type="number" step="any" value={item.quantity} onChange={e => handleUpdateQuantity(item.id, parseFloat(e.target.value))} className="w-20 p-1 border rounded text-sm font-bold bg-white" />
+                      <span className="text-xs text-gray-600 uppercase">{item.unit}</span>
+                    </div>
+                  </td>
+                  <td className="p-3">{item.description}</td>
+                  <td className="p-3 text-gray-600">{item.manufacturer} <span className="font-mono text-xs bg-gray-100 px-1 rounded">{item.model_number}</span></td>
+                  <td className="p-3"><span className="bg-blue-50 text-blue-700 text-xs px-2 py-1 rounded font-medium">{item.sheet_reference}</span></td>
+                  <td className="p-3 text-gray-500 text-xs">{item.notes}</td>
+                  <td className="p-3 text-right">
+                    <button onClick={() => handleDeleteMaterial(item.id)} className="text-gray-400 hover:text-red-600 text-xs font-bold p-1">✕</button>
+                  </td>
+                </tr>
+              ))}
+              {materials.length === 0 && (
+                <tr><td colSpan={7} className="p-6 text-center text-gray-400">No items added yet. Use standard entry or wire order app tab above.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {materials.length > 0 && (
+          <div className="mt-4 flex justify-end">
+            <button onClick={handleOpenRfqWizard} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-base px-6 py-3 rounded-lg shadow-md flex items-center gap-2">
+              ✉️ Generate RFQs ({materials.length} Line Items) ➔
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* RFQ Wizard Modal */}
+      {showRfqWizard && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-2xl w-full p-6 shadow-2xl flex flex-col">
+            {wizardStep === 'PROJECT_NAME' && (
+              <div>
+                <div className="flex justify-between items-center mb-4 pb-2 border-b">
+                  <h2 className="text-lg font-bold text-gray-800">Step 1: Set Job / Project Name</h2>
+                  <button onClick={() => setShowRfqWizard(false)} className="text-gray-400 font-bold text-lg">✕</button>
+                </div>
+                <form onSubmit={handleProceedToSuppliers} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Project Name</label>
+                    <input type="text" required value={projectName} onChange={e => setProjectName(e.target.value)} className="w-full p-3 border rounded-lg text-base font-semibold bg-gray-50" autoFocus />
+                  </div>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+                    <strong>Subject Line:</strong> <span className="font-mono">RFQ for {projectName.trim() || '[Project Name]'}</span>
+                  </div>
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button type="button" onClick={() => setShowRfqWizard(false)} className="px-4 py-2 rounded text-sm bg-gray-100">Cancel</button>
+                    <button type="submit" className="px-5 py-2 rounded text-sm text-white bg-blue-600">Continue to Suppliers ➔</button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {wizardStep === 'SUPPLIER_LIST' && (
+              <div>
+                <div className="flex justify-between items-center mb-4 pb-2 border-b">
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-800">Step 2: Dispatch RFQs to Vendors</h2>
+                    <p className="text-xs text-gray-500">Job: <span className="text-blue-600">{projectName}</span></p>
+                  </div>
+                  <button onClick={() => setShowRfqWizard(false)} className="text-gray-400 font-bold text-lg">✕</button>
+                </div>
+                <div className="border rounded-lg overflow-hidden divide-y max-h-[50vh] overflow-y-auto mb-4">
+                  <table className="w-full text-left border-collapse text-sm">
+                    <thead><tr className="bg-gray-100 text-xs text-gray-700 uppercase"><th className="p-3">Supplier</th><th className="p-3 text-center">Status</th><th className="p-3 text-right">Action</th></tr></thead>
+                    <tbody className="divide-y">
+                      {suppliers.map(sup => {
+                        const isDispatched = dispatchedSupplierIds.includes(sup.id)
+                        return (
+                          <tr key={sup.id} className="hover:bg-gray-50">
+                            <td className="p-3">
+                              <div className="font-semibold text-gray-800">{sup.company_name}</div>
+                              <div className="text-xs text-gray-500">{sup.email}</div>
+                            </td>
+                            <td className="p-3 text-center">
+                              {isDispatched ? <span className="bg-emerald-50 text-emerald-700 text-xs font-semibold px-2.5 py-1 rounded-full">✓ Dispatched</span> : <span className="text-gray-400 text-xs">Pending</span>}
+                            </td>
+                            <td className="p-3 text-right">
+                              <button onClick={() => handleOpenSupplierGmail(sup)} className={`text-xs px-3.5 py-1.5 rounded font-medium ${isDispatched ? 'bg-gray-700 text-white' : 'bg-red-600 text-white'}`}>
+                                ✉️ {isDispatched ? 'Open Again' : 'Open Gmail Draft'}
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex justify-between items-center pt-3 border-t">
+                  <button onClick={handleResetTakeoffAndClose} className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded font-semibold">Clear Takeoff & Start New Quote ✕</button>
+                  <div className="flex gap-2">
+                    <button onClick={() => setWizardStep('PROJECT_NAME')} className="px-3 py-2 rounded text-xs bg-gray-100">← Back</button>
+                    <button onClick={() => setShowRfqWizard(false)} className="px-4 py-2 rounded text-xs text-white bg-blue-600">Done / Return</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Master Catalog Modal */}
+      {showCatalogModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-3xl w-full p-6 shadow-2xl max-h-[80vh] flex flex-col">
+            <div className="flex justify-between items-center mb-4 pb-2 border-b">
+              <h2 className="text-lg font-bold text-gray-800">Master Material Catalog</h2>
+              <button onClick={() => setShowCatalogModal(false)} className="text-gray-400 font-bold">✕</button>
+            </div>
+            <div className="overflow-y-auto flex-grow border rounded-lg divide-y">
+              {catalogItems.map(cat => (
+                <div key={cat.id} className="p-3 hover:bg-gray-50 flex items-center justify-between gap-4">
+                  <div>
+                    <div className="font-semibold text-sm text-gray-800">{cat.description}</div>
+                    <div className="text-xs text-gray-500">{cat.manufacturer} <span className="font-mono">{cat.model_number}</span> • Unit: <span className="font-bold">{cat.default_unit}</span></div>
+                  </div>
+                  <button onClick={() => handleDeleteCatalogItem(cat.id)} className="bg-red-50 text-red-600 text-xs px-2.5 py-1.5 rounded">Delete</button>
+                </div>
+              ))}
