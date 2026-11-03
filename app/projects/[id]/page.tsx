@@ -302,10 +302,11 @@ function TakeoffDashboard() {
     const greeting = sup.contact_name?.trim() ? `Hello ${sup.contact_name},` : `Hello ${sup.company_name} Team,`
     let body = `${greeting}\n\nPlease provide pricing and availability for the following material package (${projectName}):\n\n`
     materials.forEach(item => {
+      const isWireOrder = item.description.trimStart().toUpperCase().startsWith('WIRE,')
       body += `• Item #${item.item_number}: ${item.quantity} ${item.unit} - ${item.description}`
-      if (item.manufacturer || item.model_number) body += ` (${item.manufacturer} ${item.model_number})`
-      if (item.sheet_reference) body += ` [Ref: ${item.sheet_reference}]`
-      if (item.notes) body += ` - Note: ${item.notes}`
+      if (!isWireOrder && (item.manufacturer || item.model_number)) body += ` (${item.manufacturer} ${item.model_number})`
+      if (!isWireOrder && item.sheet_reference) body += ` [Ref: ${item.sheet_reference}]`
+      if (!isWireOrder && item.notes) body += ` - Note: ${item.notes}`
       body += `\n`
     })
     body += `\nPlease reply with pricing, lead times, and freight terms at your earliest convenience.\n\nThank you,\nJohn Guzman`
