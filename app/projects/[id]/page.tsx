@@ -1,4 +1,4 @@
-/* VERSION: v2.1.1 START */
+/* VERSION: v2.4.0 START */
 'use client'
 
 import { useState, useEffect, useRef, Suspense } from 'react'
@@ -43,20 +43,19 @@ function TakeoffDashboard() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([])
   
-  // Autocomplete state
+  // Modal & Tab states
+  const [activeTab, setActiveTab] = useState<'STANDARD' | 'WIRE_BUNDLE'>('STANDARD')
   const [showCatalogDropdown, setShowCatalogDropdown] = useState<boolean>(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
-
-  // Notification bubble state for automatic catalog additions
   const [catalogToast, setCatalogToast] = useState<string | null>(null)
 
-  // Session tracking & Wizard Modal states
+  // RFQ Wizard states
   const [dispatchedSupplierIds, setDispatchedSupplierIds] = useState<string[]>([])
   const [showCatalogModal, setShowCatalogModal] = useState<boolean>(false)
   const [showRfqWizard, setShowRfqWizard] = useState<boolean>(false)
   const [wizardStep, setWizardStep] = useState<'PROJECT_NAME' | 'SUPPLIER_LIST'>('PROJECT_NAME')
   
-  // Material Entry Form state (Checkbox removed)
+  // Standard Material Form state
   const [form, setForm] = useState({
     quantity: 1,
     unit: 'EA',
@@ -65,6 +64,20 @@ function TakeoffDashboard() {
     model_number: '',
     sheet_reference: '',
     notes: ''
+  })
+
+  // Wire Feeder Configurator Form state
+  const [wireForm, setWireForm] = useState({
+    preset: '3-Phase 4-Wire (300 MCM + #3 Ground)',
+    runType: 'PARALLEL', // SINGLE or PARALLEL
+    conduitsCount: 2,
+    phaseSize: '300 MCM',
+    phaseType: 'THHN Copper',
+    neutralSize: '300 MCM',
+    greenSize: '#3 AWG', // Adjustable green wire size
+    lengthFeet: 150,
+    sheetReference: '',
+    notes: 'Main Service Feeder Run'
   })
 
   useEffect(() => {
@@ -88,24 +101,12 @@ function TakeoffDashboard() {
 
   async function fetchProjectDetails() {
     if (!projectId) return
-    const { data } = await supabase
-      .from('projects')
-      .select('name')
-      .eq('id', projectId)
-      .single()
-    
-    if (data?.name) {
-      setProjectName(data.name)
-    }
+    const { data } = await supabase.from('projects').select('name').eq('id', projectId).single()
+    if (data?.name) setProjectName(data.name)
   }
 
   async function fetchMaterials() {
-    const { data } = await supabase
-      .from('materials')
-      .select('*')
-      .eq('project_id', projectId)
-      .order('item_number', { ascending: true })
-    
+    const { data } = await supabase.from('materials').select('*').eq('project_id', projectId).order('item_number', { ascending: true })
     if (data) setMaterials(data)
   }
 
@@ -119,7 +120,6 @@ function TakeoffDashboard() {
     if (data) setCatalogItems(data)
   }
 
-  // Case-insensitive catalog filter
   const filteredCatalog = catalogItems.filter(item => {
     const query = form.description.toLowerCase()
     return (
@@ -140,49 +140,35 @@ function TakeoffDashboard() {
     setShowCatalogDropdown(false)
   }
 
+  // Handle adding standard material with auto-catalog insertion
   async function handleAddMaterial(e: React.FormEvent) {
     e.preventDefault()
-
     const trimmedDesc = form.description.trim()
     let catalogItemId = null
 
-    // Check if description already exists in catalog (case-insensitive)
     const existingCatalogItem = catalogItems.find(
       c => c.description?.trim().toLowerCase() === trimmedDesc.toLowerCase()
     )
 
     if (existingCatalogItem) {
-      // Use existing catalog item ID without re-adding
       catalogItemId = existingCatalogItem.id
     } else {
-      // Automatically add new item to Master Catalog
-      const { data: catalogData, error: catalogError } = await supabase
+      const { data: catalogData } = await supabase
         .from('material_catalog')
-        .insert([{
-          description: trimmedDesc,
-          manufacturer: form.manufacturer,
-          model_number: form.model_number,
-          default_unit: form.unit
-        }])
+        .insert([{ description: trimmedDesc, manufacturer: form.manufacturer, model_number: form.model_number, default_unit: form.unit }])
         .select()
         .single()
       
-      if (catalogError) {
-        alert('Catalog Error: ' + catalogError.message)
-        return
-      }
       if (catalogData) {
         catalogItemId = catalogData.id
         fetchCatalog()
-
-        // Trigger acknowledgment bubble notification
         setCatalogToast(`✨ Auto-added "${trimmedDesc}" to Master Catalog`)
         setTimeout(() => setCatalogToast(null), 4000)
       }
     }
 
     const nextItemNumber = materials.length + 1
-    const { error } = await supabase.from('materials').insert([{
+    await supabase.from('materials').insert([{
       project_id: projectId,
       catalog_item_id: catalogItemId,
       item_number: nextItemNumber,
@@ -195,13 +181,41 @@ function TakeoffDashboard() {
       notes: form.notes
     }])
 
-    if (error) {
-      alert('Material Insert Error: ' + error.message)
-    } else {
-      setForm({ quantity: 1, unit: 'EA', description: '', manufacturer: '', model_number: '', sheet_reference: '', notes: '' })
-      setShowCatalogDropdown(false)
-      fetchMaterials()
+    setForm({ quantity: 1, unit: 'EA', description: '', manufacturer: '', model_number: '', sheet_reference: '', notes: '' })
+    setShowCatalogDropdown(false)
+    fetchMaterials()
+  }
+
+  // Handle adding a Wire Bundle / Feeder run (automatically generates multiple line items)
+  async function handleAddWireBundle(e: React.FormEvent) {
+    e.preventDefault()
+    const multiplier = wireForm.runType === 'PARALLEL' ? wireForm.conduitsCount : 1
+    const totalLength = wireForm.lengthFeet * multiplier
+
+    const wireLines = [
+      { desc: `WIRE, ${wireForm.phaseSize}, ${wireForm.phaseType} (Phase Conductors)`, qty: totalLength * 3 },
+      { desc: `WIRE, ${wireForm.neutralSize}, ${wireForm.phaseType} (Neutral)`, qty: totalLength },
+      { desc: `WIRE, ${wireForm.greenSize}, COPPER THHN (Ground / Green Wire)`, qty: totalLength }
+    ]
+
+    let currentItemNum = materials.length + 1
+    for (const wl of wireLines) {
+      await supabase.from('materials').insert([{
+        project_id: projectId,
+        item_number: currentItemNum++,
+        quantity: wl.qty,
+        unit: 'FT',
+        description: wl.desc,
+        manufacturer: 'Standard',
+        model_number: 'THHN',
+        sheet_reference: wireForm.sheetReference,
+        notes: `${wireForm.runType} Run (${wireForm.conduitsCount} Conduits) - ${wireForm.notes}`
+      }])
     }
+
+    setCatalogToast(`⚡ Added Wire Feeder Bundle (${totalLength} FT total conductors)`)
+    setTimeout(() => setCatalogToast(null), 4000)
+    fetchMaterials()
   }
 
   async function handleUpdateQuantity(materialId: string, newQty: number) {
@@ -211,38 +225,26 @@ function TakeoffDashboard() {
   }
 
   async function handleDeleteMaterial(materialId: string) {
-    const { error } = await supabase.from('materials').delete().eq('id', materialId)
-    if (error) {
-      alert('Error deleting material: ' + error.message)
-    } else {
-      setMaterials(prev => prev.filter(m => m.id !== materialId))
-    }
+    await supabase.from('materials').delete().eq('id', materialId)
+    setMaterials(prev => prev.filter(m => m.id !== materialId))
   }
 
   async function handleClearAllMaterials() {
     if (!confirm('Are you sure you want to clear all items from this project takeoff?')) return
-    const { error } = await supabase.from('materials').delete().eq('project_id', projectId)
-    if (error) {
-      alert('Error clearing materials: ' + error.message)
-    } else {
-      setMaterials([])
-      setDispatchedSupplierIds([])
-    }
+    await supabase.from('materials').delete().eq('project_id', projectId)
+    setMaterials([])
+    setDispatchedSupplierIds([])
   }
 
   async function handleDeleteCatalogItem(catalogId: string) {
-    if (!confirm('Are you sure you want to remove this item from the Master Catalog?')) return
-    const { error } = await supabase.from('material_catalog').delete().eq('id', catalogId)
-    if (error) {
-      alert('Error deleting catalog item: ' + error.message)
-    } else {
-      fetchCatalog()
-    }
+    if (!confirm('Remove item from Master Catalog?')) return
+    await supabase.from('material_catalog').delete().eq('id', catalogId)
+    fetchCatalog()
   }
 
   function handleOpenRfqWizard() {
     if (materials.length === 0) {
-      alert('Please add at least one material line item to the takeoff before generating an RFQ.')
+      alert('Please add at least one material line item before generating an RFQ.')
       return
     }
     setWizardStep('PROJECT_NAME')
@@ -252,26 +254,19 @@ function TakeoffDashboard() {
   async function handleProceedToSuppliers(e: React.FormEvent) {
     e.preventDefault()
     if (!projectName.trim()) {
-      alert('Please enter a project or job name for the subject line.')
+      alert('Please enter a project name.')
       return
     }
-
     await supabase.from('projects').upsert([{ id: projectId, name: projectName.trim() }])
     setWizardStep('SUPPLIER_LIST')
   }
 
   function getEmailBodyText(sup: Supplier) {
-    const greeting = sup.contact_name?.trim()
-      ? `Hello ${sup.contact_name},`
-      : `Hello ${sup.company_name} Team,`
-
-    let body = `${greeting}\n\n`
-    body += `Please provide pricing and availability for the following material package (${projectName}):\n\n`
+    const greeting = sup.contact_name?.trim() ? `Hello ${sup.contact_name},` : `Hello ${sup.company_name} Team,`
+    let body = `${greeting}\n\nPlease provide pricing and availability for the following material package (${projectName}):\n\n`
     materials.forEach(item => {
       body += `• Item #${item.item_number}: ${item.quantity} ${item.unit} - ${item.description}`
-      if (item.manufacturer || item.model_number) {
-        body += ` (${item.manufacturer} ${item.model_number})`
-      }
+      if (item.manufacturer || item.model_number) body += ` (${item.manufacturer} ${item.model_number})`
       if (item.sheet_reference) body += ` [Ref: ${item.sheet_reference}]`
       if (item.notes) body += ` - Note: ${item.notes}`
       body += `\n`
@@ -282,36 +277,20 @@ function TakeoffDashboard() {
 
   async function handleOpenSupplierGmail(sup: Supplier) {
     const subjectLine = `RFQ for ${projectName.trim()}`
+    const { data: batch } = await supabase.from('rfq_batches').insert([{ project_id: projectId, supplier_id: sup.id, subject: subjectLine, status: 'DRAFT' }]).select().single()
 
-    const { data: batch, error } = await supabase
-      .from('rfq_batches')
-      .insert([{
-        project_id: projectId,
-        supplier_id: sup.id,
-        subject: subjectLine,
-        status: 'DRAFT'
-      }])
-      .select()
-      .single()
-
-    if (batch && !error) {
-      const rfqLineItems = materials.map(item => ({
-        rfq_batch_id: batch.id,
-        material_id: item.id
-      }))
+    if (batch) {
+      const rfqLineItems = materials.map(item => ({ rfq_batch_id: batch.id, material_id: item.id }))
       await supabase.from('rfq_line_items').insert(rfqLineItems)
     }
 
-    if (!dispatchedSupplierIds.includes(sup.id)) {
-      setDispatchedSupplierIds(prev => [...prev, sup.id])
-    }
-
+    if (!dispatchedSupplierIds.includes(sup.id)) setDispatchedSupplierIds(prev => [...prev, sup.id])
     const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(sup.email)}&su=${encodeURIComponent(subjectLine)}&body=${encodeURIComponent(getEmailBodyText(sup))}`
     window.open(gmailUrl, '_blank')
   }
 
   async function handleResetTakeoffAndClose() {
-    if (confirm('Are you sure you want to clear the entire takeoff list and start a fresh order?')) {
+    if (confirm('Clear entire takeoff list and start fresh?')) {
       await supabase.from('materials').delete().eq('project_id', projectId)
       setMaterials([])
       setDispatchedSupplierIds([])
@@ -321,8 +300,6 @@ function TakeoffDashboard() {
 
   return (
     <div className="max-w-7xl mx-auto p-6 font-sans relative">
-      
-      {/* Floating Acknowledgment Bubble Toast */}
       {catalogToast && (
         <div className="fixed top-6 right-6 z-50 bg-emerald-600 text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-xl flex items-center gap-2">
           <span>{catalogToast}</span>
@@ -331,122 +308,155 @@ function TakeoffDashboard() {
 
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">
-            M Phase RFQ Builder
-          </h1>
+          <h1 className="text-2xl font-bold text-gray-800">M Phase RFQ Builder</h1>
           <div className="flex gap-4 mt-2">
             <a href="/" className="text-xs text-blue-600 hover:underline font-semibold">← Dashboard</a>
             <a href="/suppliers" className="text-xs text-blue-600 hover:underline font-semibold">⚙️ Suppliers</a>
             <a href="/history" className="text-xs text-blue-600 hover:underline font-semibold">📁 Sent RFQ History</a>
           </div>
         </div>
-        <button 
-          onClick={() => setShowCatalogModal(true)}
-          className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 shadow-sm flex items-center justify-center gap-2"
-        >
+        <button onClick={() => setShowCatalogModal(true)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 shadow-sm">
           📂 Master Catalog ({catalogItems.length})
         </button>
       </div>
 
-      {/* Section 1: Add Material Form */}
-      <div className="mb-8">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">1. Material Entry & Specification</h3>
-        <form onSubmit={handleAddMaterial} className="bg-gray-50 p-4 rounded-lg border grid grid-cols-1 md:grid-cols-4 gap-4">
-          
-          <div className="relative" ref={dropdownRef}>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">
-              Description / Spec <span className="text-gray-400 font-normal">(Auto-adds if new)</span>
-            </label>
-            <input 
-              type="text" 
-              required 
-              placeholder="e.g. Enclosure / conduit" 
-              value={form.description} 
-              onFocus={() => setShowCatalogDropdown(true)}
-              onChange={e => {
-                setForm({...form, description: e.target.value})
-                setShowCatalogDropdown(true)
-              }} 
-              className="w-full p-2 border rounded text-sm bg-white" 
-            />
-
-            {showCatalogDropdown && form.description.trim().length > 0 && filteredCatalog.length > 0 && (
-              <div className="absolute left-0 right-0 top-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto z-40 divide-y">
-                <div className="p-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 bg-gray-50">
-                  Matching Catalog Items
-                </div>
-                {filteredCatalog.map(item => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => handleSelectAutocomplete(item)}
-                    className="w-full text-left p-2.5 hover:bg-blue-50 transition-colors flex flex-col gap-0.5"
-                  >
-                    <div className="text-xs font-bold text-gray-800">{item.description}</div>
-                    <div className="text-[11px] text-gray-500">
-                      {item.manufacturer && <span>{item.manufacturer} </span>}
-                      {item.model_number && <span className="font-mono bg-gray-100 px-1 rounded">{item.model_number}</span>}
-                      <span className="ml-2 font-semibold text-blue-600">[{item.default_unit || 'EA'}]</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Manufacturer</label>
-            <input type="text" placeholder="e.g. Hoffman / Cooper" value={form.manufacturer} onChange={e => setForm({...form, manufacturer: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Model / Part #</label>
-            <input type="text" placeholder="e.g. JIC-12106-CH" value={form.model_number} onChange={e => setForm({...form, model_number: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Qty</label>
-              <input type="number" step="any" required value={form.quantity} onChange={e => setForm({...form, quantity: parseFloat(e.target.value)})} className="w-full p-2 border rounded text-sm bg-white" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Unit</label>
-              <select value={form.unit} onChange={e => setForm({...form, unit: e.target.value})} className="w-full p-2 border rounded text-sm bg-white">
-                <option value="EA">EA</option>
-                <option value="FT">FT</option>
-                <option value="SET">SET</option>
-                <option value="LOT">LOT</option>
-                <option value="BOX">BOX</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Sheet Reference</label>
-            <input type="text" placeholder="e.g. Sheet E-501" value={form.sheet_reference} onChange={e => setForm({...form, sheet_reference: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Notes / Specifications</label>
-            <input type="text" placeholder="e.g. Stainless steel mounting brackets required" value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
-          </div>
-          <div className="md:col-span-2 flex items-end">
-            <button type="submit" className="w-full bg-blue-600 text-white p-2.5 rounded text-sm font-medium hover:bg-blue-700 shadow-xs">Add Line Item</button>
-          </div>
-        </form>
+      {/* Section 1: Entry Mode Switcher (Standard vs Wire Feeder Configurator) */}
+      <div className="mb-6 flex border-b">
+        <button
+          onClick={() => setActiveTab('STANDARD')}
+          className={`px-4 py-2 text-xs font-bold uppercase border-b-2 transition-colors ${activeTab === 'STANDARD' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+        >
+          📦 Standard Material / Equipment Entry
+        </button>
+        <button
+          onClick={() => setActiveTab('WIRE_BUNDLE')}
+          className={`px-4 py-2 text-xs font-bold uppercase border-b-2 transition-colors ${activeTab === 'WIRE_BUNDLE' ? 'border-amber-600 text-amber-700 bg-amber-50/50' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+        >
+          ⚡ Wire Feeder & Parallel Run Configurator
+        </button>
       </div>
 
-      {/* Section 2: Material Takeoff Table */}
+      {/* Tab 1: Standard Material Form */}
+      {activeTab === 'STANDARD' && (
+        <div className="mb-8">
+          <form onSubmit={handleAddMaterial} className="bg-gray-50 p-4 rounded-lg border grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="relative" ref={dropdownRef}>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Description / Spec</label>
+              <input 
+                type="text" 
+                required 
+                placeholder="e.g. Enclosure / conduit" 
+                value={form.description} 
+                onFocus={() => setShowCatalogDropdown(true)}
+                onChange={e => { setForm({...form, description: e.target.value}); setShowCatalogDropdown(true) }} 
+                className="w-full p-2 border rounded text-sm bg-white" 
+              />
+              {showCatalogDropdown && form.description.trim().length > 0 && filteredCatalog.length > 0 && (
+                <div className="absolute left-0 right-0 top-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto z-40 divide-y">
+                  {filteredCatalog.map(item => (
+                    <button key={item.id} type="button" onClick={() => handleSelectAutocomplete(item)} className="w-full text-left p-2.5 hover:bg-blue-50 text-xs">
+                      <div className="font-bold text-gray-800">{item.description}</div>
+                      <div className="text-[11px] text-gray-500">{item.manufacturer} <span className="font-mono">{item.model_number}</span></div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Manufacturer</label>
+              <input type="text" placeholder="e.g. Hoffman" value={form.manufacturer} onChange={e => setForm({...form, manufacturer: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Model / Part #</label>
+              <input type="text" placeholder="e.g. JIC-12106" value={form.model_number} onChange={e => setForm({...form, model_number: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Qty</label>
+                <input type="number" step="any" required value={form.quantity} onChange={e => setForm({...form, quantity: parseFloat(e.target.value)})} className="w-full p-2 border rounded text-sm bg-white" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Unit</label>
+                <select value={form.unit} onChange={e => setForm({...form, unit: e.target.value})} className="w-full p-2 border rounded text-sm bg-white">
+                  <option value="EA">EA</option><option value="FT">FT</option><option value="SET">SET</option><option value="LOT">LOT</option><option value="BOX">BOX</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Sheet Reference</label>
+              <input type="text" placeholder="e.g. E-501" value={form.sheet_reference} onChange={e => setForm({...form, sheet_reference: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Notes</label>
+              <input type="text" placeholder="Additional requirements" value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
+            </div>
+            <div className="md:col-span-2 flex items-end">
+              <button type="submit" className="w-full bg-blue-600 text-white p-2.5 rounded text-sm font-medium hover:bg-blue-700">Add Line Item</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Tab 2: Wire Feeder & Parallel Run Configurator */}
+      {activeTab === 'WIRE_BUNDLE' && (
+        <div className="mb-8">
+          <form onSubmit={handleAddWireBundle} className="bg-amber-50/50 p-4 rounded-lg border border-amber-200 grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-amber-900 mb-1">Run Structure</label>
+              <select value={wireForm.runType} onChange={e => setWireForm({...wireForm, runType: e.target.value})} className="w-full p-2 border rounded text-sm bg-white">
+                <option value="PARALLEL">Parallel Run</option>
+                <option value="SINGLE">Single Run</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-amber-900 mb-1">Conduits / Sets</label>
+              <input type="number" min="1" value={wireForm.conduitsCount} onChange={e => setWireForm({...wireForm, conduitsCount: parseInt(e.target.value)})} className="w-full p-2 border rounded text-sm bg-white" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-amber-900 mb-1">Phase Conductor Size</label>
+              <input type="text" required value={wireForm.phaseSize} onChange={e => setWireForm({...wireForm, phaseSize: e.target.value})} placeholder="e.g. 300 MCM / 500 MCM" className="w-full p-2 border rounded text-sm bg-white" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-amber-900 mb-1">Neutral Size</label>
+              <input type="text" required value={wireForm.neutralSize} onChange={e => setWireForm({...wireForm, neutralSize: e.target.value})} placeholder="e.g. 300 MCM" className="w-full p-2 border rounded text-sm bg-white" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-amber-900 mb-1">Green / Ground Wire Size (Adjustable)</label>
+              <input type="text" required value={wireForm.greenSize} onChange={e => setWireForm({...wireForm, greenSize: e.target.value})} placeholder="e.g. #3 AWG / 1/0 AWG" className="w-full p-2 border rounded text-sm bg-white text-emerald-700 font-bold" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-amber-900 mb-1">Run Length (Feet)</label>
+              <input type="number" step="any" required value={wireForm.lengthFeet} onChange={e => setWireForm({...wireForm, lengthFeet: parseFloat(e.target.value)})} className="w-full p-2 border rounded text-sm bg-white" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-amber-900 mb-1">Sheet Reference</label>
+              <input type="text" value={wireForm.sheetReference} onChange={e => setWireForm({...wireForm, sheetReference: e.target.value})} placeholder="e.g. E-201" className="w-full p-2 border rounded text-sm bg-white" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-amber-900 mb-1">Notes</label>
+              <input type="text" value={wireForm.notes} onChange={e => setWireForm({...wireForm, notes: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
+            </div>
+            <div className="md:col-span-4 flex justify-end">
+              <button type="submit" className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-6 py-2.5 rounded text-sm shadow-sm">
+                ⚡ Add Complete Wire Feeder Bundle to Takeoff
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Section 2: Compiled Takeoff Table */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">2. Compiled Project Material Takeoff ({materials.length} items) — <span className="text-blue-600">Click qty to edit</span></h3>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">2. Compiled Project Material Takeoff ({materials.length} items)</h3>
           {materials.length > 0 && (
-            <button 
-              onClick={handleClearAllMaterials}
-              className="text-xs font-semibold text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded transition-colors"
-            >
+            <button onClick={handleClearAllMaterials} className="text-xs font-semibold text-red-600 hover:text-red-800 bg-red-50 px-2.5 py-1 rounded">
               Clear Takeoff ✕
             </button>
           )}
         </div>
         <div className="bg-white border rounded-lg overflow-hidden shadow-sm">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left border-collapse text-sm">
             <thead>
               <tr className="bg-gray-100 border-b text-xs text-gray-700 uppercase">
                 <th className="p-3 w-12">#</th>
@@ -458,19 +468,13 @@ function TakeoffDashboard() {
                 <th className="p-3 text-right">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y text-sm">
+            <tbody className="divide-y">
               {materials.map((item) => (
                 <tr key={item.id} className="hover:bg-gray-50">
                   <td className="p-3 font-medium text-gray-500">{item.item_number}</td>
                   <td className="p-3 font-semibold">
                     <div className="flex items-center gap-1.5">
-                      <input
-                        type="number"
-                        step="any"
-                        value={item.quantity}
-                        onChange={e => handleUpdateQuantity(item.id, parseFloat(e.target.value))}
-                        className="w-20 p-1 border rounded text-sm font-bold text-gray-800 bg-white focus:bg-blue-50"
-                      />
+                      <input type="number" step="any" value={item.quantity} onChange={e => handleUpdateQuantity(item.id, parseFloat(e.target.value))} className="w-20 p-1 border rounded text-sm font-bold bg-white" />
                       <span className="text-xs text-gray-600 uppercase">{item.unit}</span>
                     </div>
                   </td>
@@ -479,20 +483,12 @@ function TakeoffDashboard() {
                   <td className="p-3"><span className="bg-blue-50 text-blue-700 text-xs px-2 py-1 rounded font-medium">{item.sheet_reference}</span></td>
                   <td className="p-3 text-gray-500 text-xs">{item.notes}</td>
                   <td className="p-3 text-right">
-                    <button 
-                      onClick={() => handleDeleteMaterial(item.id)}
-                      className="text-gray-400 hover:text-red-600 text-xs font-bold p-1 rounded transition-colors"
-                      title="Remove item"
-                    >
-                      ✕
-                    </button>
+                    <button onClick={() => handleDeleteMaterial(item.id)} className="text-gray-400 hover:text-red-600 text-xs font-bold p-1">✕</button>
                   </td>
                 </tr>
               ))}
               {materials.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="p-6 text-center text-gray-400">No specialized materials added to this project yet. Use the form above or browse the Master Catalog.</td>
-                </tr>
+                <tr><td colSpan={7} className="p-6 text-center text-gray-400">No items added yet. Use standard entry or wire bundle configurator above.</td></tr>
               )}
             </tbody>
           </table>
@@ -500,63 +496,34 @@ function TakeoffDashboard() {
 
         {materials.length > 0 && (
           <div className="mt-4 flex justify-end">
-            <button
-              onClick={handleOpenRfqWizard}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-base px-6 py-3 rounded-lg shadow-md transition-colors flex items-center gap-2"
-            >
+            <button onClick={handleOpenRfqWizard} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-base px-6 py-3 rounded-lg shadow-md flex items-center gap-2">
               ✉️ Generate RFQs ({materials.length} Line Items) ➔
             </button>
           </div>
         )}
       </div>
 
-      {/* RFQ Dispatch Wizard Modal */}
+      {/* RFQ Wizard Modal */}
       {showRfqWizard && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl max-w-2xl w-full p-6 shadow-2xl flex flex-col">
-            
             {wizardStep === 'PROJECT_NAME' && (
               <div>
                 <div className="flex justify-between items-center mb-4 pb-2 border-b">
                   <h2 className="text-lg font-bold text-gray-800">Step 1: Set Job / Project Name</h2>
-                  <button onClick={() => setShowRfqWizard(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg">✕</button>
+                  <button onClick={() => setShowRfqWizard(false)} className="text-gray-400 font-bold text-lg">✕</button>
                 </div>
-                <p className="text-xs text-gray-600 mb-4">
-                  Please enter or confirm the Project / Job Name below. This will automatically be used in the email subject line (<strong>RFQ for [Project Name]</strong>) for all vendor emails.
-                </p>
-                
                 <form onSubmit={handleProceedToSuppliers} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">Project / Job Name</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Compass Self Storage / Newark Airport Terminal A"
-                      value={projectName}
-                      onChange={e => setProjectName(e.target.value)}
-                      className="w-full p-3 border rounded-lg text-base font-semibold bg-gray-50 focus:bg-white"
-                      autoFocus
-                    />
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Project Name</label>
+                    <input type="text" required value={projectName} onChange={e => setProjectName(e.target.value)} className="w-full p-3 border rounded-lg text-base font-semibold bg-gray-50" autoFocus />
                   </div>
-
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
-                    <strong>Preview Subject Line:</strong> <span className="font-mono">RFQ for {projectName.trim() || '[Project Name]'}</span>
+                    <strong>Subject Line:</strong> <span className="font-mono">RFQ for {projectName.trim() || '[Project Name]'}</span>
                   </div>
-
                   <div className="flex justify-end gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowRfqWizard(false)}
-                      className="px-4 py-2 rounded text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 font-medium"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-5 py-2 rounded text-sm text-white bg-blue-600 hover:bg-blue-700 font-semibold shadow-xs"
-                    >
-                      Continue to Suppliers ➔
-                    </button>
+                    <button type="button" onClick={() => setShowRfqWizard(false)} className="px-4 py-2 rounded text-sm bg-gray-100">Cancel</button>
+                    <button type="submit" className="px-5 py-2 rounded text-sm text-white bg-blue-600">Continue to Suppliers ➔</button>
                   </div>
                 </form>
               </div>
@@ -567,20 +534,13 @@ function TakeoffDashboard() {
                 <div className="flex justify-between items-center mb-4 pb-2 border-b">
                   <div>
                     <h2 className="text-lg font-bold text-gray-800">Step 2: Dispatch RFQs to Vendors</h2>
-                    <p className="text-xs text-gray-500 font-medium">Job: <span className="text-blue-600">{projectName}</span> ({materials.length} line items)</p>
+                    <p className="text-xs text-gray-500">Job: <span className="text-blue-600">{projectName}</span></p>
                   </div>
-                  <button onClick={() => setShowRfqWizard(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg">✕</button>
+                  <button onClick={() => setShowRfqWizard(false)} className="text-gray-400 font-bold text-lg">✕</button>
                 </div>
-
                 <div className="border rounded-lg overflow-hidden divide-y max-h-[50vh] overflow-y-auto mb-4">
                   <table className="w-full text-left border-collapse text-sm">
-                    <thead>
-                      <tr className="bg-gray-100 text-xs text-gray-700 uppercase">
-                        <th className="p-3">Supplier</th>
-                        <th className="p-3 text-center">Status</th>
-                        <th className="p-3 text-right">Action</th>
-                      </tr>
-                    </thead>
+                    <thead><tr className="bg-gray-100 text-xs text-gray-700 uppercase"><th className="p-3">Supplier</th><th className="p-3 text-center">Status</th><th className="p-3 text-right">Action</th></tr></thead>
                     <tbody className="divide-y">
                       {suppliers.map(sup => {
                         const isDispatched = dispatchedSupplierIds.includes(sup.id)
@@ -588,110 +548,53 @@ function TakeoffDashboard() {
                           <tr key={sup.id} className="hover:bg-gray-50">
                             <td className="p-3">
                               <div className="font-semibold text-gray-800">{sup.company_name}</div>
-                              <div className="text-xs text-gray-500">{sup.contact_name || 'General Rep'} • <span className="font-mono text-blue-600">{sup.email}</span></div>
+                              <div className="text-xs text-gray-500">{sup.email}</div>
                             </td>
                             <td className="p-3 text-center">
-                              {isDispatched ? (
-                                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold px-2.5 py-1 rounded-full inline-flex items-center gap-1">
-                                  ✓ RFQ Dispatched
-                                </span>
-                              ) : (
-                                <span className="text-gray-400 text-xs">Pending</span>
-                              )}
+                              {isDispatched ? <span className="bg-emerald-50 text-emerald-700 text-xs font-semibold px-2.5 py-1 rounded-full">✓ Dispatched</span> : <span className="text-gray-400 text-xs">Pending</span>}
                             </td>
                             <td className="p-3 text-right">
-                              <button
-                                onClick={() => handleOpenSupplierGmail(sup)}
-                                className={`text-xs px-3.5 py-1.5 rounded font-medium transition-colors shadow-xs inline-flex items-center gap-1.5 ${isDispatched ? 'bg-gray-700 hover:bg-gray-800 text-white' : 'bg-red-600 hover:bg-red-700 text-white'}`}
-                              >
+                              <button onClick={() => handleOpenSupplierGmail(sup)} className={`text-xs px-3.5 py-1.5 rounded font-medium ${isDispatched ? 'bg-gray-700 text-white' : 'bg-red-600 text-white'}`}>
                                 ✉️ {isDispatched ? 'Open Again' : 'Open Gmail Draft'}
                               </button>
                             </td>
                           </tr>
                         )
                       })}
-                      {suppliers.length === 0 && (
-                        <tr>
-                          <td colSpan={3} className="p-6 text-center text-gray-400">No active suppliers configured. Add them in the Supplier Directory.</td>
-                        </tr>
-                      )}
                     </tbody>
                   </table>
                 </div>
-
-                <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-3 border-t">
-                  <button
-                    onClick={handleResetTakeoffAndClose}
-                    className="text-xs text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 px-3 py-2 rounded font-semibold transition-colors"
-                  >
-                    Clear Takeoff & Start New Quote ✕
-                  </button>
+                <div className="flex justify-between items-center pt-3 border-t">
+                  <button onClick={handleResetTakeoffAndClose} className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded font-semibold">Clear Takeoff & Start New Quote ✕</button>
                   <div className="flex gap-2">
-                    <button
-                      onClick={() => setWizardStep('PROJECT_NAME')}
-                      className="px-3 py-2 rounded text-xs text-gray-600 bg-gray-100 hover:bg-gray-200 font-semibold"
-                    >
-                      ← Back to Job Name
-                    </button>
-                    <button
-                      onClick={() => setShowRfqWizard(false)}
-                      className="px-4 py-2 rounded text-xs text-white bg-blue-600 hover:bg-blue-700 font-semibold"
-                    >
-                      Done / Return to Takeoff
-                    </button>
+                    <button onClick={() => setWizardStep('PROJECT_NAME')} className="px-3 py-2 rounded text-xs bg-gray-100">← Back</button>
+                    <button onClick={() => setShowRfqWizard(false)} className="px-4 py-2 rounded text-xs text-white bg-blue-600">Done / Return</button>
                   </div>
                 </div>
-
               </div>
             )}
-
           </div>
         </div>
       )}
 
       {/* Master Catalog Modal */}
       {showCatalogModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl max-w-3xl w-full p-6 shadow-2xl max-h-[80vh] flex flex-col">
             <div className="flex justify-between items-center mb-4 pb-2 border-b">
               <h2 className="text-lg font-bold text-gray-800">Master Material Catalog</h2>
-              <button onClick={() => setShowCatalogModal(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg">✕</button>
+              <button onClick={() => setShowCatalogModal(false)} className="text-gray-400 font-bold">✕</button>
             </div>
-            <p className="text-xs text-gray-500 mb-4">Select an item below to prefill Section 1 (including its default unit), or remove items you no longer use.</p>
-            
             <div className="overflow-y-auto flex-grow border rounded-lg divide-y">
-              {catalogItems.map((cat) => (
+              {catalogItems.map(cat => (
                 <div key={cat.id} className="p-3 hover:bg-gray-50 flex items-center justify-between gap-4">
                   <div>
                     <div className="font-semibold text-sm text-gray-800">{cat.description}</div>
-                    <div className="text-xs text-gray-500">
-                      {cat.manufacturer} <span className="font-mono bg-gray-100 px-1 rounded">{cat.model_number}</span> • Unit: <span className="font-bold">{cat.default_unit || 'EA'}</span>
-                    </div>
+                    <div className="text-xs text-gray-500">{cat.manufacturer} <span className="font-mono">{cat.model_number}</span> • Unit: <span className="font-bold">{cat.default_unit}</span></div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => handleSelectAutocomplete(cat)}
-                      className="bg-blue-600 text-white text-xs px-3 py-1.5 rounded font-medium hover:bg-blue-700 whitespace-nowrap"
-                    >
-                      Use in Entry Form ➔
-                    </button>
-                    <button 
-                      onClick={() => handleDeleteCatalogItem(cat.id)}
-                      className="bg-red-50 text-red-600 hover:bg-red-100 text-xs px-2.5 py-1.5 rounded font-medium transition-colors"
-                      title="Delete from Master Catalog"
-                    >
-                      Delete
-                    </button>
-                  </div>
+                  <button onClick={() => handleDeleteCatalogItem(cat.id)} className="bg-red-50 text-red-600 text-xs px-2.5 py-1.5 rounded">Delete</button>
                 </div>
               ))}
-              {catalogItems.length === 0 && (
-                <div className="p-8 text-center text-gray-400 text-sm">No items saved in the master catalog yet. New items will be added automatically as you enter them!</div>
-              )}
-            </div>
-
-            <div className="mt-4 pt-3 border-t flex justify-end">
-              <button onClick={() => setShowCatalogModal(false)} className="bg-gray-200 text-gray-700 px-4 py-2 rounded text-sm font-medium hover:bg-gray-300">Close</button>
             </div>
           </div>
         </div>
@@ -707,4 +610,4 @@ export default function ProjectTakeoffPage() {
     </Suspense>
   )
 }
-/* VERSION: v2.1.1 END */
+/* VERSION: v2.4.0 END */
