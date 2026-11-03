@@ -214,8 +214,7 @@ function TakeoffDashboard() {
         description: desc,
         manufacturer: wireForm.wireMaterial,
         model_number: wireForm.wireType,
-        sheet_reference: wireForm.pullId,
-        notes: `Wire Pull ID: ${wireForm.pullId}${prepString}`
+        sheet_reference: wireForm.pullId
       }])
     }
 
@@ -230,8 +229,7 @@ function TakeoffDashboard() {
         description: greenDesc,
         manufacturer: wireForm.wireMaterial,
         model_number: wireForm.wireType,
-        sheet_reference: wireForm.pullId,
-        notes: `Green Ground Wire for Pull ID: ${wireForm.pullId}`
+        sheet_reference: wireForm.pullId
       }])
     }
 
