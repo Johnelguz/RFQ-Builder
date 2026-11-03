@@ -1,4 +1,3 @@
-/* Version 2.5.5*/
 'use client'
 
 import { useState, useEffect, useRef, Suspense } from 'react'
@@ -350,7 +349,7 @@ function TakeoffDashboard() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-800">M Phase RFQ Builder</h1>
-            <span className="bg-amber-100 text-amber-800 text-[10px] font-mono px-2 py-0.5 rounded font-bold">v2.5.5 Active</span>
+            <span className="bg-amber-100 text-amber-800 text-[10px] font-mono px-2 py-0.5 rounded font-bold">v2.5.6 Active</span>
           </div>
           <div className="flex gap-4 mt-2">
             <a href="/" className="text-xs text-blue-600 hover:underline font-semibold">← Dashboard</a>
@@ -747,3 +746,19 @@ function TakeoffDashboard() {
                   <button onClick={() => handleDeleteCatalogItem(cat.id)} className="bg-red-50 text-red-600 text-xs px-2.5 py-1.5 rounded">Delete</button>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function ProjectTakeoffPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-gray-500 font-sans">Loading takeoff dashboard...</div>}>
+      <TakeoffDashboard />
+    </Suspense>
+  )
+}
+/* VERSION: v2.5.6 END */
