@@ -313,6 +313,17 @@ export default function ProjectCostsPage() {
     [invoices]
   )
   const remainingBudget = budget == null ? null : budget - postedExpenses
+  const budgetUsagePercent = budget != null && budget > 0 ? (postedExpenses / budget) * 100 : 0
+  const budgetBarWidth = budget == null
+    ? 0
+    : budget > 0
+      ? Math.min(budgetUsagePercent, 100)
+      : postedExpenses > 0 ? 100 : 0
+  const budgetBarColor = remainingBudget != null && remainingBudget < 0
+    ? 'bg-red-500'
+    : budgetUsagePercent >= 80
+      ? 'bg-amber-500'
+      : 'bg-blue-600'
   const draftLineTotal = useMemo(
     () => draftItems.reduce((sum, item) => {
       const quantity = Number(item.quantity)
@@ -781,6 +792,76 @@ export default function ProjectCostsPage() {
               </p>
               {remainingBudget != null && <p className="mt-2 text-xs text-gray-500">{budget === 0 ? 'Budget is zero.' : `${((postedExpenses / (budget || 1)) * 100).toFixed(1)}% of budget spent`}</p>}
             </div>
+          </section>
+
+          <section aria-labelledby="budget-expenses-heading" className="mb-8 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 id="budget-expenses-heading" className="text-base font-semibold text-gray-800">Budget vs. expenses</h2>
+                <p className="mt-1 text-xs text-gray-500">Posted invoice totals compared with the manual material budget.</p>
+              </div>
+              {budget != null && budget > 0 && (
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                  remainingBudget != null && remainingBudget < 0
+                    ? 'bg-red-50 text-red-700'
+                    : budgetUsagePercent >= 80
+                      ? 'bg-amber-50 text-amber-700'
+                      : 'bg-blue-50 text-blue-700'
+                }`}>
+                  {budgetUsagePercent.toFixed(1)}% used
+                </span>
+              )}
+            </div>
+
+            {budget == null ? (
+              <p className="mt-5 rounded-lg bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                Set a material budget above to compare it with posted invoice expenses.
+              </p>
+            ) : (
+              <>
+                <div className="mt-6" role="group" aria-label="Posted expenses as a proportion of the material budget">
+                  <div
+                    role="progressbar"
+                    aria-label="Material budget spent"
+                    aria-valuemin={0}
+                    aria-valuemax={budget > 0 ? budget : 1}
+                    aria-valuenow={budget > 0
+                      ? Math.min(postedExpenses, budget)
+                      : postedExpenses > 0 ? 1 : 0}
+                    aria-valuetext={budget === 0
+                      ? `${currency(postedExpenses)} expenses against a ${currency(budget)} budget`
+                      : `${currency(postedExpenses)} of ${currency(budget)} spent`}
+                    className="h-4 overflow-hidden rounded-full bg-gray-100"
+                  >
+                    <div
+                      className={`h-full rounded-full transition-[width] duration-500 ${budgetBarColor}`}
+                      style={{ width: `${budgetBarWidth}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap items-start justify-between gap-x-6 gap-y-2 text-sm">
+                  <div>
+                    <span className="text-gray-500">Expenses</span>
+                    <span className="ml-2 font-semibold text-gray-800">{currency(postedExpenses)}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Budget</span>
+                    <span className="ml-2 font-semibold text-gray-800">{currency(budget)}</span>
+                  </div>
+                  <div className="sm:text-right">
+                    <span className="text-gray-500">{remainingBudget != null && remainingBudget < 0 ? 'Over budget' : 'Remaining'}</span>
+                    <span className={`ml-2 font-semibold ${remainingBudget != null && remainingBudget < 0 ? 'text-red-700' : 'text-gray-800'}`}>
+                      {currency(Math.abs(remainingBudget ?? 0))}
+                    </span>
+                  </div>
+                </div>
+                {budget === 0 && (
+                  <p className={`mt-3 text-xs ${postedExpenses > 0 ? 'text-red-700' : 'text-gray-500'}`}>
+                    {postedExpenses > 0 ? 'Expenses exceed the zero-dollar budget.' : 'Budget is zero; any expense will exceed it.'}
+                  </p>
+                )}
+              </>
+            )}
           </section>
 
           {canEditCosts && (
