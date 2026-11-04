@@ -42,6 +42,10 @@ function TakeoffDashboard() {
   const canManageRfqs = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
   
   const [projectName, setProjectName] = useState<string>('')
+  const [projectNameDraft, setProjectNameDraft] = useState('')
+  const [editingProjectName, setEditingProjectName] = useState(false)
+  const [savingProjectName, setSavingProjectName] = useState(false)
+  const [projectNameError, setProjectNameError] = useState<string | null>(null)
   const [materials, setMaterials] = useState<Material[]>([])
   const [materialsProjectId, setMaterialsProjectId] = useState<string | null>(null)
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -299,6 +303,44 @@ function TakeoffDashboard() {
     setShowRfqWizard(true)
   }, [materials.length])
 
+  function handleEditProjectName() {
+    setProjectNameDraft(projectName)
+    setProjectNameError(null)
+    setEditingProjectName(true)
+  }
+
+  async function handleSaveProjectName(event: React.FormEvent) {
+    event.preventDefault()
+    const name = projectNameDraft.trim()
+    if (!name) {
+      setProjectNameError('Enter a project name.')
+      return
+    }
+
+    setSavingProjectName(true)
+    setProjectNameError(null)
+    try {
+      const { data, error: updateError } = await supabase
+        .from('projects')
+        .update({ name })
+        .eq('id', projectId)
+        .select('id')
+        .single()
+
+      if (updateError || !data) {
+        setProjectNameError(`Unable to update project name: ${updateError?.message || 'Project was not found.'}`)
+        return
+      }
+
+      setProjectName(name)
+      setEditingProjectName(false)
+    } catch (updateError) {
+      setProjectNameError(`Unable to update project name: ${updateError instanceof Error ? updateError.message : 'Unexpected network error.'}`)
+    } finally {
+      setSavingProjectName(false)
+    }
+  }
+
   useEffect(() => {
     if (materialsProjectId !== projectId || handledDashboardRfqProjectId.current === projectId) return
     const url = new URL(window.location.href)
@@ -380,6 +422,47 @@ function TakeoffDashboard() {
             <h1 className="text-2xl font-bold text-gray-800">M Phase RFQ Builder</h1>
             <span className="bg-amber-100 text-amber-800 text-[10px] font-mono px-2 py-0.5 rounded font-bold">v2.5.6 Active</span>
           </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {editingProjectName ? (
+              <form onSubmit={handleSaveProjectName} className="flex flex-wrap items-center gap-2">
+                <label htmlFor="project-name" className="text-sm font-semibold text-gray-700">Project:</label>
+                <input
+                  id="project-name"
+                  autoFocus
+                  required
+                  value={projectNameDraft}
+                  onChange={event => setProjectNameDraft(event.target.value)}
+                  className="rounded border bg-white px-2.5 py-1.5 text-sm font-semibold"
+                  aria-describedby={projectNameError ? 'project-name-error' : undefined}
+                />
+                <button disabled={savingProjectName} className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
+                  {savingProjectName ? 'Saving…' : 'Save name'}
+                </button>
+                <button
+                  type="button"
+                  disabled={savingProjectName}
+                  onClick={() => { setEditingProjectName(false); setProjectNameError(null) }}
+                  className="rounded border px-3 py-1.5 text-xs font-semibold text-gray-600 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+              </form>
+            ) : (
+              <>
+                <h2 className="text-base font-semibold text-gray-700">Project: {projectName || 'Loading…'}</h2>
+                {canManageRfqs && projectName && (
+                  <button
+                    type="button"
+                    onClick={handleEditProjectName}
+                    className="rounded border bg-white px-2.5 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                  >
+                    Edit name
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+          {projectNameError && <p id="project-name-error" role="alert" className="mt-1 text-xs text-red-700">{projectNameError}</p>}
           <div className="flex gap-4 mt-2">
             <Link href="/" className="text-xs text-blue-600 hover:underline font-semibold">← Dashboard</Link>
             <Link href={`/projects/${projectId}/quotes`} className="text-xs text-blue-600 hover:underline font-semibold">💲 Vendor Quotes</Link>
