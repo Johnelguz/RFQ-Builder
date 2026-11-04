@@ -60,9 +60,41 @@ interface DraftInvoiceItem {
   unit_price: string
 }
 
-function localDateString() {
-  const date = new Date()
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+interface ExtractedInvoice {
+  vendorName: string
+  invoiceNumber: string
+  invoiceDate: string
+  invoiceTotal: string
+  items: Array<{
+    item_number: number
+    description: string
+    quantity: string
+    unit: string
+    unit_price: string
+  }>
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isExtractedInvoice(value: unknown): value is ExtractedInvoice {
+  if (!isRecord(value)
+    || typeof value.vendorName !== 'string'
+    || typeof value.invoiceNumber !== 'string'
+    || typeof value.invoiceDate !== 'string'
+    || typeof value.invoiceTotal !== 'string'
+    || !Array.isArray(value.items)) {
+    return false
+  }
+  return value.items.every(item =>
+    isRecord(item)
+    && typeof item.item_number === 'number'
+    && typeof item.description === 'string'
+    && typeof item.quantity === 'string'
+    && typeof item.unit === 'string'
+    && typeof item.unit_price === 'string'
+  )
 }
 
 function currency(amount: number) {
@@ -71,10 +103,6 @@ function currency(amount: number) {
 
 function newDraftItem(): DraftInvoiceItem {
   return { source_material_id: '', description: '', quantity: '1', unit: 'EA', unit_price: '' }
-}
-
-function safeFileName(name: string) {
-  return name.normalize('NFKC').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-180)
 }
 
 export default function ProjectCostsPage() {
@@ -92,15 +120,18 @@ export default function ProjectCostsPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)
   const [savingInvoice, setSavingInvoice] = useState(false)
+  const [extractingInvoice, setExtractingInvoice] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [supplierId, setSupplierId] = useState('')
   const [vendorName, setVendorName] = useState('')
   const [invoiceNumber, setInvoiceNumber] = useState('')
-  const [invoiceDate, setInvoiceDate] = useState(localDateString)
+  const [invoiceDate, setInvoiceDate] = useState('')
   const [invoiceTotal, setInvoiceTotal] = useState('')
   const [invoiceNotes, setInvoiceNotes] = useState('')
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null)
+  const [uploadedFilePath, setUploadedFilePath] = useState<string | null>(null)
+  const [extractionWarnings, setExtractionWarnings] = useState<string[]>([])
   const [draftItems, setDraftItems] = useState<DraftInvoiceItem[]>([newDraftItem()])
   const [totalDifferenceConfirmed, setTotalDifferenceConfirmed] = useState(false)
   const [openingInvoiceId, setOpeningInvoiceId] = useState<string | null>(null)
@@ -172,17 +203,9 @@ export default function ProjectCostsPage() {
   }
 
   function handleMaterialSelect(index: number, materialId: string) {
-    const material = materials.find(item => item.id === materialId)
     setDraftItems(current => current.map((item, currentIndex) => {
       if (currentIndex !== index) return item
-      if (!material) return { ...item, source_material_id: '' }
-      return {
-        ...item,
-        source_material_id: material.id,
-        description: material.description,
-        quantity: String(material.quantity),
-        unit: material.unit
-      }
+      return { ...item, source_material_id: materialId }
     }))
   }
 
@@ -200,6 +223,166 @@ export default function ProjectCostsPage() {
   function removeDraftItem(index: number) {
     setDraftItems(current => current.filter((_, currentIndex) => currentIndex !== index))
     setTotalDifferenceConfirmed(false)
+  }
+
+  async function getAccessToken() {
+    const { data, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError) throw new Error(`Unable to verify your sign-in: ${sessionError.message}`)
+    if (!data.session?.access_token) throw new Error('Sign in again before uploading an invoice.')
+    return data.session.access_token
+  }
+
+  async function handleExtractInvoice() {
+    setError(null)
+    setNotice(null)
+    setExtractionWarnings([])
+    if (!canEditCosts) {
+      setError('Only administrators and cost editors may upload invoices.')
+      return
+    }
+    if (!invoiceFile) {
+      setError('Choose an invoice PDF or image first.')
+      return
+    }
+    if (!ACCEPTED_TYPES.includes(invoiceFile.type) || invoiceFile.size === 0 || invoiceFile.size > MAX_FILE_SIZE) {
+      setError('Invoice files must be a non-empty PDF, JPEG, PNG, or WebP no larger than 20 MB.')
+      return
+    }
+
+    setExtractingInvoice(true)
+    let uploadedPath: string | null = null
+    try {
+      const accessToken = await getAccessToken()
+      const uploadUrlResponse = await fetch(`/api/projects/${projectId}/invoices/upload`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: invoiceFile.name, mimeType: invoiceFile.type, size: invoiceFile.size })
+      })
+      const uploadUrlData: unknown = await uploadUrlResponse.json()
+      if (!uploadUrlResponse.ok || !isRecord(uploadUrlData)
+        || typeof uploadUrlData.filePath !== 'string' || typeof uploadUrlData.token !== 'string') {
+        const message = isRecord(uploadUrlData) && typeof uploadUrlData.error === 'string'
+          ? uploadUrlData.error
+          : 'Unable to prepare the private invoice upload.'
+        throw new Error(message)
+      }
+
+      const filePath = uploadUrlData.filePath
+      const uploadToken = uploadUrlData.token
+      uploadedPath = filePath
+      const { error: uploadError } = await supabase.storage
+        .from(INVOICE_BUCKET)
+        .uploadToSignedUrl(filePath, uploadToken, invoiceFile, {
+          contentType: invoiceFile.type,
+          upsert: false
+        })
+      if (uploadError) throw new Error(`Unable to upload invoice file: ${uploadError.message}`)
+
+      const extractionResponse = await fetch(`/api/projects/${projectId}/invoices/extract`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filePath,
+          fileName: invoiceFile.name,
+          mimeType: invoiceFile.type
+        })
+      })
+      const extractionData: unknown = await extractionResponse.json()
+      if (!extractionResponse.ok || !isRecord(extractionData) || !isExtractedInvoice(extractionData.extracted)) {
+        const message = isRecord(extractionData) && typeof extractionData.error === 'string'
+          ? extractionData.error
+          : 'Unable to extract invoice details.'
+        throw new Error(message)
+      }
+
+      const extracted = extractionData.extracted
+      const matchingSupplier = suppliers.find(supplier =>
+        supplier.company_name.trim().toLowerCase() === extracted.vendorName.trim().toLowerCase()
+      )
+      setSupplierId(matchingSupplier?.id || '')
+      setVendorName(extracted.vendorName)
+      setInvoiceNumber(extracted.invoiceNumber)
+      setInvoiceDate(extracted.invoiceDate)
+      setInvoiceTotal(extracted.invoiceTotal)
+      setInvoiceNotes('')
+      setDraftItems(extracted.items.map(item => {
+        const source = materials.find(material =>
+          material.description.trim().toLowerCase() === item.description.trim().toLowerCase()
+        )
+        return {
+          source_material_id: source?.id || '',
+          description: item.description,
+          quantity: item.quantity,
+          unit: item.unit || source?.unit || 'EA',
+          unit_price: item.unit_price
+        }
+      }))
+      setUploadedFilePath(uploadedPath)
+      setExtractionWarnings(Array.isArray(extractionData.warnings)
+        ? extractionData.warnings.filter((warning): warning is string => typeof warning === 'string')
+        : [])
+      setTotalDifferenceConfirmed(false)
+      setNotice('Invoice uploaded and extracted. Review the detected details and line items before recording it.')
+    } catch (extractError) {
+      let cleanupMessage = ''
+      if (uploadedPath) {
+        try {
+          const accessToken = await getAccessToken()
+          const cleanupResponse = await fetch(`/api/projects/${projectId}/invoices/upload`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filePath: uploadedPath })
+          })
+          if (!cleanupResponse.ok) {
+            const cleanupData: unknown = await cleanupResponse.json()
+            const cleanupError = isRecord(cleanupData) && typeof cleanupData.error === 'string'
+              ? cleanupData.error
+              : 'Unknown cleanup error.'
+            cleanupMessage = ` The unused upload could not be removed: ${cleanupError}`
+          }
+        } catch (cleanupError) {
+          cleanupMessage = ` The unused upload could not be removed: ${cleanupError instanceof Error ? cleanupError.message : 'Unexpected cleanup error.'}`
+        }
+      }
+      setError(`${extractError instanceof Error ? extractError.message : 'Unexpected invoice extraction error.'}${cleanupMessage}`)
+    } finally {
+      setExtractingInvoice(false)
+    }
+  }
+
+  async function handleDiscardInvoice() {
+    if (!uploadedFilePath) return
+    setError(null)
+    try {
+      const accessToken = await getAccessToken()
+      const response = await fetch(`/api/projects/${projectId}/invoices/upload`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: uploadedFilePath })
+      })
+      const responseData: unknown = response.status === 204 ? null : await response.json()
+      if (!response.ok) {
+        const message = isRecord(responseData) && typeof responseData.error === 'string'
+          ? responseData.error
+          : 'Unable to discard the uploaded invoice.'
+        setError(message)
+        return
+      }
+      setUploadedFilePath(null)
+      setExtractionWarnings([])
+      setInvoiceFile(null)
+      setSupplierId('')
+      setVendorName('')
+      setInvoiceNumber('')
+      setInvoiceDate('')
+      setInvoiceTotal('')
+      setInvoiceNotes('')
+      setDraftItems([newDraftItem()])
+      setTotalDifferenceConfirmed(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    } catch (discardError) {
+      setError(`Unable to discard the uploaded invoice: ${discardError instanceof Error ? discardError.message : 'Unexpected network error.'}`)
+    }
   }
 
   async function handleSaveBudget(event: React.FormEvent) {
@@ -246,16 +429,8 @@ export default function ProjectCostsPage() {
       setError('Only administrators and cost editors may record invoices.')
       return
     }
-    if (!invoiceFile) {
-      setError('Select the invoice PDF or image to upload.')
-      return
-    }
-    if (!ACCEPTED_TYPES.includes(invoiceFile.type)) {
-      setError('Invoice files must be PDF, JPEG, PNG, or WebP.')
-      return
-    }
-    if (invoiceFile.size > MAX_FILE_SIZE) {
-      setError('Invoice files must be 20 MB or smaller.')
+    if (!invoiceFile || !uploadedFilePath) {
+      setError('Upload and extract the invoice before recording it.')
       return
     }
     if (!vendorName.trim()) {
@@ -308,19 +483,7 @@ export default function ProjectCostsPage() {
     }
 
     setSavingInvoice(true)
-    const safeName = safeFileName(invoiceFile.name) || 'invoice'
-    const filePath = `${projectId}/${crypto.randomUUID()}/${safeName}`
-    let uploaded = false
     try {
-      const { error: uploadError } = await supabase.storage
-        .from(INVOICE_BUCKET)
-        .upload(filePath, invoiceFile, { contentType: invoiceFile.type, upsert: false })
-      if (uploadError) {
-        setError(`Unable to upload invoice file: ${uploadError.message}`)
-        return
-      }
-      uploaded = true
-
       const { error: insertError } = await supabase.rpc('create_material_invoice', {
         p_project_id: projectId,
         p_supplier_id: supplierId || null,
@@ -329,39 +492,33 @@ export default function ProjectCostsPage() {
         p_invoice_date: invoiceDate,
         p_invoice_total: parsedInvoiceTotal,
         p_notes: invoiceNotes.trim() || null,
-        p_file_path: filePath,
+        p_file_path: uploadedFilePath,
         p_file_name: invoiceFile.name,
         p_file_mime_type: invoiceFile.type,
         p_items: parsedItems
       })
 
       if (insertError) {
-        const { error: cleanupError } = await supabase.storage.from(INVOICE_BUCKET).remove([filePath])
-        uploaded = Boolean(cleanupError)
-        setError(`Unable to save the invoice record: ${insertError.message}${cleanupError ? ` The uploaded file could not be removed: ${cleanupError.message}` : ''}`)
+        setError(`Unable to save the invoice record: ${insertError.message}`)
         return
       }
 
-      uploaded = false
       setNotice('Invoice recorded. Its total is counted once against the project material budget.')
       setSupplierId('')
       setVendorName('')
       setInvoiceNumber('')
-      setInvoiceDate(localDateString())
+      setInvoiceDate('')
       setInvoiceTotal('')
       setInvoiceNotes('')
       setInvoiceFile(null)
+      setUploadedFilePath(null)
+      setExtractionWarnings([])
       setDraftItems([newDraftItem()])
       setTotalDifferenceConfirmed(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
       await fetchProjectCosts()
     } catch (saveError) {
-      if (uploaded) {
-        const { error: cleanupError } = await supabase.storage.from(INVOICE_BUCKET).remove([filePath])
-        setError(`Unable to save the invoice: ${saveError instanceof Error ? saveError.message : 'Unexpected network error.'}${cleanupError ? ` The uploaded file could not be removed: ${cleanupError.message}` : ''}`)
-      } else {
-        setError(`Unable to save the invoice: ${saveError instanceof Error ? saveError.message : 'Unexpected network error.'}`)
-      }
+      setError(`Unable to save the invoice: ${saveError instanceof Error ? saveError.message : 'Unexpected network error.'}`)
     } finally {
       setSavingInvoice(false)
     }
@@ -472,13 +629,60 @@ export default function ProjectCostsPage() {
           {canEditCosts && (
             <section className="mb-8 rounded-xl border bg-white p-5 shadow-sm">
               <h2 className="text-lg font-semibold text-gray-800">Record a material invoice</h2>
-              <p className="mt-1 text-xs text-gray-500">Files are stored privately in Supabase and are visible only to signed-in team members. Invoice text is not sent to an external extraction service.</p>
+              <p className="mt-1 text-xs text-gray-500">Upload a PDF or image to extract invoice details and line items with Google Document AI. Verify the results before posting; only the invoice total counts as the expense.</p>
+              <div className="mt-5 space-y-5">
+                {!uploadedFilePath ? (
+                  <div className="flex flex-wrap items-end gap-3">
+                    <label className="min-w-64 flex-1 text-sm font-medium text-gray-700">
+                      Invoice PDF or image
+                      <input
+                        ref={fileInputRef}
+                        required
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
+                        onChange={event => setInvoiceFile(event.target.files?.[0] || null)}
+                        className="mt-1 block w-full rounded border p-2 text-sm"
+                      />
+                      <span className="mt-1 block text-xs font-normal text-gray-500">PDF, JPEG, PNG, or WebP; up to 20 MB.</span>
+                    </label>
+                    <button
+                      type="button"
+                      disabled={extractingInvoice || !invoiceFile}
+                      onClick={() => void handleExtractInvoice()}
+                      className="rounded bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                    >
+                      {extractingInvoice ? 'Uploading and extracting…' : 'Upload and extract'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">
+                    <span>Uploaded and extracted: <strong>{invoiceFile?.name}</strong></span>
+                    <button
+                      type="button"
+                      disabled={savingInvoice}
+                      onClick={() => void handleDiscardInvoice()}
+                      className="rounded border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
+                    >
+                      Discard and choose another
+                    </button>
+                  </div>
+                )}
+                {extractionWarnings.length > 0 && (
+                  <div role="status" className="rounded bg-amber-50 p-3 text-sm text-amber-900">
+                    <p className="font-semibold">Please check the extracted information:</p>
+                    <ul className="mt-1 list-inside list-disc">
+                      {extractionWarnings.map(warning => <li key={warning}>{warning}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+              {uploadedFilePath && (
               <form onSubmit={handleSaveInvoice} className="mt-5 space-y-5">
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   <label className="text-sm font-medium text-gray-700">
-                    Vendor
+                    Match vendor (optional)
                     <select value={supplierId} onChange={event => handleSupplierChange(event.target.value)} className="mt-1 w-full rounded border bg-white p-2.5">
-                      <option value="">Enter vendor manually</option>
+                      <option value="">No supplier match</option>
                       {suppliers.filter(supplier => supplier.is_active).map(supplier => (
                         <option key={supplier.id} value={supplier.id}>{supplier.company_name}</option>
                       ))}
@@ -500,25 +704,13 @@ export default function ProjectCostsPage() {
                     Invoice total
                     <input required type="number" min="0" step="0.01" value={invoiceTotal} onChange={event => { setInvoiceTotal(event.target.value); setTotalDifferenceConfirmed(false) }} className="mt-1 w-full rounded border p-2.5" placeholder="Amount charged" />
                   </label>
-                  <label className="text-sm font-medium text-gray-700 sm:col-span-2 lg:col-span-3">
-                    Invoice PDF or image
-                    <input
-                      ref={fileInputRef}
-                      required
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
-                      onChange={event => setInvoiceFile(event.target.files?.[0] || null)}
-                      className="mt-1 block w-full rounded border p-2 text-sm"
-                    />
-                    <span className="mt-1 block text-xs font-normal text-gray-500">PDF, JPEG, PNG, or WebP; up to 20 MB.</span>
-                  </label>
                 </div>
 
                 <div>
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <h3 className="font-semibold text-gray-800">Purchased materials</h3>
-                      <p className="text-xs text-gray-500">Optional takeoff matching helps identify the project material; invoice descriptions and costs are kept as their own snapshot.</p>
+                      <p className="text-xs text-gray-500">Extracted line details are saved as a snapshot; matching to a takeoff item is optional.</p>
                     </div>
                     <button type="button" onClick={addDraftItem} className="rounded border px-3 py-1.5 text-xs font-semibold text-blue-700">Add line</button>
                   </div>
@@ -578,10 +770,11 @@ export default function ProjectCostsPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
                   <p className="max-w-2xl text-xs text-gray-500">After you save, the invoice total is posted once as a project expense. Line-item totals are retained for detail and do not add another expense.</p>
                   <button disabled={savingInvoice} className="rounded bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-60">
-                    {savingInvoice ? 'Uploading and saving…' : 'Upload and record invoice'}
+                    {savingInvoice ? 'Saving invoice…' : 'Record extracted invoice'}
                   </button>
                 </div>
               </form>
+              )}
             </section>
           )}
 

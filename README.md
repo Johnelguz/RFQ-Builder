@@ -29,13 +29,37 @@ After the authentication migration is active, apply [`supabase/migrations/202611
 
 RFQ Managers and Admins can record and delete quotes; all roles can view and compare them. Open a project, then choose **Vendor Quotes**. A recorded quote is independent from later takeoff edits.
 
-## Manual material budgets and invoices
+## Material budgets and invoice extraction
 
 After the authentication and quote migrations are active, apply [`supabase/migrations/20261103220200_project_budgets_and_invoices.sql`](./supabase/migrations/20261103220200_project_budgets_and_invoices.sql) in the Supabase SQL Editor. It adds a manually editable project material budget, immutable invoice records and line-item snapshots, voiding with a reason, and a private `project-invoices` Supabase Storage bucket.
 
-Admins and Cost Editors can set a project budget and record invoices. Invoice line details do not count as separate expenses: only the posted invoice header total is subtracted from the budget. A voided invoice remains visible but is excluded from expense totals. Invoice files are private and available to signed-in team members using short-lived signed links. The initial workflow is manual entry; it does not send documents to an external extraction service.
+Admins and Cost Editors can set a project budget and record invoices. Invoice line details do not count as separate expenses: only the posted invoice header total is subtracted from the budget. A voided invoice remains visible but is excluded from expense totals. Invoice files are stored privately in Supabase and available to signed-in team members using short-lived signed links.
 
-Open a project and choose **Material Costs** to set the budget, upload a PDF or image invoice (20 MB maximum), enter its material lines, and review any difference between line-item totals and the invoice total before saving.
+Invoice upload uses Google Cloud Document AI's Invoice Parser. Enable the Document AI API and billing, create an Invoice Parser processor, and configure Vercel-to-Google Workload Identity Federation (WIF). WIF uses short-lived credentials and does not require downloading a service-account key.
+
+1. In Vercel **Settings → Security**, enable OpenID Connect (OIDC). Use the team issuer mode and note your Vercel team slug and project name.
+2. In Google Cloud **IAM & Admin → Workload Identity Federation**, create a pool in the global location and an OIDC provider. Use the team issuer URL `https://oidc.vercel.com/YOUR_VERCEL_TEAM_SLUG`, select the provider's default audience, and map `google.subject` to `assertion.sub`.
+3. Restrict the provider with an attribute condition for only this production deployment: `assertion.sub == 'owner:YOUR_VERCEL_TEAM_SLUG:project:YOUR_VERCEL_PROJECT_NAME:environment:production'`.
+4. Create a Google service account. Grant it **Document AI API User** (`roles/documentai.apiUser`) on the Google Cloud project.
+5. Grant the Vercel production subject `principal://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/POOL_ID/subject/owner:YOUR_VERCEL_TEAM_SLUG:project:YOUR_VERCEL_PROJECT_NAME:environment:production` the **Workload Identity User** (`roles/iam.workloadIdentityUser`) role on that service account. This allows only that Vercel production deployment to impersonate it.
+6. Add the following server-only variables to Vercel. Copy `GCP_AUDIENCE` from the provider details page; it should use the provider's default audience URL.
+
+| Variable | Value |
+| --- | --- |
+| `GCP_PROJECT_ID` | Google Cloud project ID that owns the processor |
+| `GCP_PROJECT_NUMBER` | Numeric Google Cloud project number |
+| `GCP_SERVICE_ACCOUNT_EMAIL` | Email address of the service account |
+| `GCP_WORKLOAD_IDENTITY_POOL_ID` | Workload identity pool ID |
+| `GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID` | OIDC provider ID |
+| `GCP_AUDIENCE` | Default audience URL shown in the provider details |
+| `GOOGLE_DOCUMENT_AI_LOCATION` | Processor location, such as `us` or `eu` |
+| `GOOGLE_DOCUMENT_AI_PROCESSOR_ID` | Invoice Parser processor ID |
+
+Do not create or upload a service-account key. These variables are identifiers, not secrets; never add a `NEXT_PUBLIC_` prefix. Redeploy after setting them. Invoice PDFs/images are sent to Google Document AI for extraction; Google Cloud charges and data-processing terms apply.
+
+Open a project and choose **Material Costs** to set its budget, upload a PDF or image invoice (20 MB maximum), and let Document AI extract vendor, invoice date/number/total, and line items. Review and correct the extracted fields before recording. Only the invoice total is counted once against the project budget; line-item details are not separate expenses.
+
+For local extraction testing, link the workspace to its Vercel project and run `vercel env pull` to retrieve local development variables, including Vercel's OIDC token. The Google identity condition above intentionally permits only the production environment; use a separate restricted identity binding if local or preview extraction is needed.
 
 ## Roles
 
