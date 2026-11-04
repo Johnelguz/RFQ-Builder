@@ -366,6 +366,7 @@ function TakeoffDashboard() {
           </div>
           <div className="flex gap-4 mt-2">
             <Link href="/" className="text-xs text-blue-600 hover:underline font-semibold">← Dashboard</Link>
+            <Link href={`/projects/${projectId}/quotes`} className="text-xs text-blue-600 hover:underline font-semibold">💲 Vendor Quotes</Link>
             <Link href="/suppliers" className="text-xs text-blue-600 hover:underline font-semibold">⚙️ Suppliers</Link>
             <Link href="/history" className="text-xs text-blue-600 hover:underline font-semibold">📁 Sent RFQ History</Link>
           </div>

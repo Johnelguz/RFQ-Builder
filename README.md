@@ -23,6 +23,12 @@ The app uses Supabase Auth for sign-in and database row-level security (RLS) for
 
 The existing Supabase URL and anon-key environment variables remain `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Keep the tested database backup available before applying the migration. The migration replaces the existing public table policies with authenticated role-based policies; after it is applied, unauthenticated access to the app data is denied.
 
+## Vendor quote capture
+
+After the authentication migration is active, apply [`supabase/migrations/20261103220100_vendor_quote_capture.sql`](./supabase/migrations/20261103220100_vendor_quote_capture.sql) in the Supabase SQL Editor. It adds quote headers and independent material snapshots, including unit prices and freight/tax/other charges. The quote total is calculated from priced line items plus those charges. Blank unit prices are retained as unpriced lines rather than treated as zero.
+
+RFQ Managers and Admins can record and delete quotes; all roles can view and compare them. Open a project, then choose **Vendor Quotes**. A recorded quote is independent from later takeoff edits.
+
 ## Roles
 
 Roles can be combined:
@@ -31,9 +37,9 @@ Roles can be combined:
 | --- | --- |
 | Admin | Manage all app data, invite users, and assign roles |
 | RFQ Manager | Create projects, edit material takeoffs, manage suppliers, and create/manage RFQs |
-| Reviewer | View project takeoffs and RFQ history |
-| Cost Editor | View project and RFQ data; budget and invoice editing will be added in a later phase |
-| Viewer | Read-only access to project and RFQ data |
+| Reviewer | View project takeoffs, RFQ history, and vendor quote comparisons |
+| Cost Editor | View project, RFQ, and vendor quote data; budget and invoice editing will be added in a later phase |
+| Viewer | Read-only access to project, RFQ, and vendor quote data |
 
 Database policies are the security boundary. Hiding controls in the UI is only for usability.
 
