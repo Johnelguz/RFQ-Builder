@@ -96,6 +96,62 @@ export default function Home() {
     }
   }
 
+  const projectColumns = [
+    { status: 'awarded', title: 'Awarded' },
+    { status: 'bidding', title: 'Bidding' },
+    { status: 'closed', title: 'Closed' }
+  ].map(column => ({
+    ...column,
+    projects: projects.filter(project => (project.status || 'bidding').toLowerCase() === column.status)
+  }))
+  const knownStatuses = projectColumns.map(column => column.status)
+  const otherProjects = projects.filter(project =>
+    !knownStatuses.includes((project.status || 'bidding').toLowerCase())
+  )
+
+  function renderProjectCard(project: Project) {
+    const status = (project.status || 'bidding').toLowerCase()
+    return (
+      <article
+        key={project.id}
+        className="rounded-lg border bg-white p-4 shadow-sm transition hover:border-blue-400 hover:bg-blue-50/40"
+      >
+        <button
+          type="button"
+          onClick={() => router.push(`/projects/${project.id}`)}
+          className="block w-full text-left text-lg font-semibold text-gray-800 hover:text-blue-700"
+        >
+          {project.name}
+        </button>
+        <span className="mt-2 block text-xs text-gray-500">
+          {project.job_number ? `Job ${project.job_number}` : 'No job number'}
+          {project.location ? ` · ${project.location}` : ''}
+        </span>
+        {canCreateProjects ? (
+          <label className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-gray-600">
+            Status
+            <select
+              value={status}
+              disabled={savingStatusProjectId === project.id}
+              onChange={event => void handleProjectStatusChange(project.id, event.target.value)}
+              aria-label={`Status for ${project.name}`}
+              className="rounded border bg-white px-2 py-1 text-xs capitalize disabled:opacity-60"
+            >
+              {!knownStatuses.includes(status) && <option value={status}>{project.status}</option>}
+              <option value="awarded">Awarded</option>
+              <option value="bidding">Bidding</option>
+              <option value="closed">Closed</option>
+            </select>
+          </label>
+        ) : (
+          <span className="mt-3 inline-block rounded bg-gray-100 px-2 py-1 text-xs capitalize text-gray-600">
+            {project.status || 'bidding'}
+          </span>
+        )}
+      </article>
+    )
+  }
+
   return (
     <main className="mx-auto w-full max-w-7xl p-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -150,49 +206,34 @@ export default function Home() {
       {loading ? (
         <p className="mt-8 text-sm text-gray-500">Loading projects…</p>
       ) : (
-        <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.map(project => (
-            <article
-              key={project.id}
-              className="rounded-lg border bg-white p-5 text-left shadow-sm transition hover:border-blue-400 hover:bg-blue-50/40"
-            >
-              <button
-                type="button"
-                onClick={() => router.push(`/projects/${project.id}`)}
-                className="block w-full text-left text-lg font-semibold text-gray-800 hover:text-blue-700"
-              >
-                {project.name}
-              </button>
-              <span className="mt-2 block text-xs text-gray-500">
-                {project.job_number ? `Job ${project.job_number}` : 'No job number'}
-                {project.location ? ` · ${project.location}` : ''}
-              </span>
-              {canCreateProjects ? (
-                <label className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-gray-600">
-                  Status
-                  <select
-                    value={project.status || 'bidding'}
-                    disabled={savingStatusProjectId === project.id}
-                    onChange={event => void handleProjectStatusChange(project.id, event.target.value)}
-                    aria-label={`Status for ${project.name}`}
-                    className="rounded border bg-white px-2 py-1 text-xs capitalize disabled:opacity-60"
-                  >
-                    {!['bidding', 'awarded'].includes((project.status || 'bidding').toLowerCase()) && (
-                      <option value={project.status || ''}>{project.status}</option>
-                    )}
-                    <option value="bidding">Bidding</option>
-                    <option value="awarded">Awarded</option>
-                  </select>
-                </label>
-              ) : (
-                <span className="mt-3 inline-block rounded bg-gray-100 px-2 py-1 text-xs capitalize text-gray-600">
-                  {project.status || 'bidding'}
-                </span>
-              )}
-            </article>
+        <section className="mt-6 grid items-start gap-5 md:grid-cols-3">
+          {projectColumns.map(column => (
+            <div key={column.status} className="min-w-0 rounded-xl border bg-gray-50 p-4">
+              <div className="mb-3 flex items-center justify-between border-b pb-3">
+                <h2 className="font-semibold text-gray-800">{column.title}</h2>
+                <span className="rounded-full bg-white px-2 py-0.5 text-xs text-gray-500">{column.projects.length}</span>
+              </div>
+              <div className="space-y-3">
+                {column.projects.map(renderProjectCard)}
+                {column.projects.length === 0 && (
+                  <p className="rounded-lg border border-dashed bg-white p-4 text-sm text-gray-400">No {column.title.toLowerCase()} projects.</p>
+                )}
+              </div>
+            </div>
           ))}
+          {otherProjects.length > 0 && (
+            <div className="min-w-0 rounded-xl border bg-gray-50 p-4">
+              <div className="mb-3 flex items-center justify-between border-b pb-3">
+                <h2 className="font-semibold text-gray-800">Other</h2>
+                <span className="rounded-full bg-white px-2 py-0.5 text-xs text-gray-500">{otherProjects.length}</span>
+              </div>
+              <div className="space-y-3">
+                {otherProjects.map(renderProjectCard)}
+              </div>
+            </div>
+          )}
           {projects.length === 0 && (
-            <p className="rounded-lg border border-dashed p-8 text-sm text-gray-500 sm:col-span-2 lg:col-span-3">
+            <p className="rounded-lg border border-dashed bg-white p-8 text-sm text-gray-500 md:col-span-3">
               No projects found. {canCreateProjects ? 'Create a project to get started.' : 'Ask an RFQ Manager to create a project.'}
             </p>
           )}

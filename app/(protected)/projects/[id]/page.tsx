@@ -35,10 +35,32 @@ interface CatalogItem {
   typical_notes: string
 }
 
+interface SavedRfqWorkflow {
+  version: 1
+  showRfqWizard: boolean
+  wizardStep: 'PROJECT_NAME' | 'SUPPLIER_LIST'
+  dispatchedSupplierIds: string[]
+}
+
+function isSavedRfqWorkflow(value: unknown): value is SavedRfqWorkflow {
+  return typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && 'version' in value
+    && value.version === 1
+    && 'showRfqWizard' in value
+    && typeof value.showRfqWizard === 'boolean'
+    && 'wizardStep' in value
+    && (value.wizardStep === 'PROJECT_NAME' || value.wizardStep === 'SUPPLIER_LIST')
+    && 'dispatchedSupplierIds' in value
+    && Array.isArray(value.dispatchedSupplierIds)
+    && value.dispatchedSupplierIds.every(id => typeof id === 'string')
+}
+
 function TakeoffDashboard() {
   const params = useParams()
   const projectId = params?.id as string
-  const { roles } = useAuth()
+  const { roles, user } = useAuth()
   const canManageRfqs = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
   
   const [projectName, setProjectName] = useState<string>('')
@@ -65,6 +87,8 @@ function TakeoffDashboard() {
   const [showRfqWizard, setShowRfqWizard] = useState<boolean>(false)
   const [wizardStep, setWizardStep] = useState<'PROJECT_NAME' | 'SUPPLIER_LIST'>('PROJECT_NAME')
   const handledDashboardRfqProjectId = useRef<string | null>(null)
+  const [restoredRfqWorkflowProjectId, setRestoredRfqWorkflowProjectId] = useState<string | null>(null)
+  const rfqWorkflowStorageKey = `rfq-workflow:v1:${user?.id || 'anonymous'}:${projectId}`
   
   // Standard Material Form state
   const [form, setForm] = useState({
@@ -134,6 +158,56 @@ function TakeoffDashboard() {
       return () => window.clearTimeout(timer)
     }
   }, [projectId, fetchProjectDetails, fetchMaterials, fetchSuppliers, fetchCatalog])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = window.sessionStorage.getItem(rfqWorkflowStorageKey)
+        if (saved) {
+          const workflow: unknown = JSON.parse(saved)
+          if (!isSavedRfqWorkflow(workflow)) {
+            window.sessionStorage.removeItem(rfqWorkflowStorageKey)
+            alert('The saved RFQ dispatch session was invalid and has been cleared.')
+          } else {
+            setShowRfqWizard(workflow.showRfqWizard)
+            setWizardStep(workflow.wizardStep)
+            setDispatchedSupplierIds(workflow.dispatchedSupplierIds)
+          }
+        }
+      } catch (restoreError) {
+        alert(`Unable to restore the RFQ dispatch session: ${restoreError instanceof Error ? restoreError.message : 'Browser storage is unavailable.'}`)
+      } finally {
+        setRestoredRfqWorkflowProjectId(projectId)
+      }
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [projectId, rfqWorkflowStorageKey])
+
+  useEffect(() => {
+    if (restoredRfqWorkflowProjectId !== projectId) return
+    try {
+      if (!showRfqWizard && dispatchedSupplierIds.length === 0 && wizardStep === 'PROJECT_NAME') {
+        window.sessionStorage.removeItem(rfqWorkflowStorageKey)
+        return
+      }
+      const workflow: SavedRfqWorkflow = {
+        version: 1,
+        showRfqWizard,
+        wizardStep,
+        dispatchedSupplierIds
+      }
+      window.sessionStorage.setItem(rfqWorkflowStorageKey, JSON.stringify(workflow))
+    } catch (saveError) {
+      alert(`Unable to preserve the RFQ dispatch session: ${saveError instanceof Error ? saveError.message : 'Browser storage is unavailable.'}`)
+    }
+  }, [
+    dispatchedSupplierIds,
+    projectId,
+    restoredRfqWorkflowProjectId,
+    rfqWorkflowStorageKey,
+    showRfqWizard,
+    wizardStep
+  ])
 
   const filteredCatalog = catalogItems.filter(item => {
     const query = form.description.toLowerCase()
@@ -285,7 +359,7 @@ function TakeoffDashboard() {
     if (!confirm('Are you sure you want to clear all items from this project takeoff?')) return
     await supabase.from('materials').delete().eq('project_id', projectId)
     setMaterials([])
-    setDispatchedSupplierIds([])
+    closeRfqWizard(true)
   }
 
   async function handleDeleteCatalogItem(catalogId: string) {
@@ -299,9 +373,29 @@ function TakeoffDashboard() {
       alert('Please add at least one material line item before generating an RFQ.')
       return
     }
-    setWizardStep('PROJECT_NAME')
+    setWizardStep(dispatchedSupplierIds.length > 0 ? 'SUPPLIER_LIST' : 'PROJECT_NAME')
     setShowRfqWizard(true)
-  }, [materials.length])
+  }, [dispatchedSupplierIds.length, materials.length])
+
+  function closeRfqWizard(clearDispatchHistory = false) {
+    setShowRfqWizard(false)
+    try {
+      if (clearDispatchHistory || dispatchedSupplierIds.length === 0) {
+        setDispatchedSupplierIds([])
+        setWizardStep('PROJECT_NAME')
+        window.sessionStorage.removeItem(rfqWorkflowStorageKey)
+      } else {
+        window.sessionStorage.setItem(rfqWorkflowStorageKey, JSON.stringify({
+          version: 1,
+          showRfqWizard: false,
+          wizardStep,
+          dispatchedSupplierIds
+        } satisfies SavedRfqWorkflow))
+      }
+    } catch (storageError) {
+      alert(`Unable to clear the saved RFQ dispatch session: ${storageError instanceof Error ? storageError.message : 'Browser storage is unavailable.'}`)
+    }
+  }
 
   function handleEditProjectName() {
     setProjectNameDraft(projectName)
@@ -387,7 +481,20 @@ function TakeoffDashboard() {
       await supabase.from('rfq_line_items').insert(rfqLineItems)
     }
 
-    if (!dispatchedSupplierIds.includes(sup.id)) setDispatchedSupplierIds(prev => [...prev, sup.id])
+    const nextDispatchedSupplierIds = dispatchedSupplierIds.includes(sup.id)
+      ? dispatchedSupplierIds
+      : [...dispatchedSupplierIds, sup.id]
+    setDispatchedSupplierIds(nextDispatchedSupplierIds)
+    try {
+      window.sessionStorage.setItem(rfqWorkflowStorageKey, JSON.stringify({
+        version: 1,
+        showRfqWizard: true,
+        wizardStep: 'SUPPLIER_LIST',
+        dispatchedSupplierIds: nextDispatchedSupplierIds
+      } satisfies SavedRfqWorkflow))
+    } catch (storageError) {
+      alert(`Unable to preserve which vendor drafts were opened: ${storageError instanceof Error ? storageError.message : 'Browser storage is unavailable.'}`)
+    }
     const emailBody = getEmailBodyText(sup)
     if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
       const mailtoUrl = `mailto:${sup.email}?subject=${encodeURIComponent(subjectLine)}&body=${encodeURIComponent(emailBody)}`
@@ -403,8 +510,7 @@ function TakeoffDashboard() {
     if (confirm('Clear entire takeoff list and start fresh?')) {
       await supabase.from('materials').delete().eq('project_id', projectId)
       setMaterials([])
-      setDispatchedSupplierIds([])
-      setShowRfqWizard(false)
+      closeRfqWizard(true)
     }
   }
 
@@ -784,7 +890,7 @@ function TakeoffDashboard() {
               <div>
                 <div className="flex justify-between items-center mb-4 pb-2 border-b">
                   <h2 className="text-lg font-bold text-gray-800">Step 1: Set Job / Project Name</h2>
-                  <button onClick={() => setShowRfqWizard(false)} className="text-gray-400 font-bold text-lg">✕</button>
+                  <button onClick={() => closeRfqWizard()} className="text-gray-400 font-bold text-lg">✕</button>
                 </div>
                 <form onSubmit={handleProceedToSuppliers} className="space-y-4">
                   <div>
@@ -795,7 +901,7 @@ function TakeoffDashboard() {
                     <strong>Subject Line:</strong> <span className="font-mono">RFQ for {projectName.trim() || '[Project Name]'}</span>
                   </div>
                   <div className="flex justify-end gap-3 pt-2">
-                    <button type="button" onClick={() => setShowRfqWizard(false)} className="px-4 py-2 rounded text-sm bg-gray-100">Cancel</button>
+                    <button type="button" onClick={() => closeRfqWizard()} className="px-4 py-2 rounded text-sm bg-gray-100">Cancel</button>
                     <button type="submit" className="px-5 py-2 rounded text-sm text-white bg-blue-600">Continue to Suppliers ➔</button>
                   </div>
                 </form>
@@ -809,9 +915,12 @@ function TakeoffDashboard() {
                     <h2 className="text-lg font-bold text-gray-800">Step 2: Dispatch RFQs to Vendors</h2>
                     <p className="text-xs text-gray-500">Job: <span className="text-blue-600">{projectName}</span></p>
                   </div>
-                  <button onClick={() => setShowRfqWizard(false)} className="text-gray-400 font-bold text-lg">✕</button>
+                  <button onClick={() => closeRfqWizard()} className="text-gray-400 font-bold text-lg">✕</button>
                 </div>
                 <div className="border rounded-lg overflow-hidden divide-y max-h-[50vh] overflow-y-auto mb-4">
+                  <p className="bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                    “Draft opened” means the email draft was opened from this app; Gmail does not report whether it was sent.
+                  </p>
                   <table className="w-full text-left border-collapse text-sm">
                     <thead><tr className="bg-gray-100 text-xs text-gray-700 uppercase"><th className="p-3">Supplier</th><th className="p-3 text-center">Status</th><th className="p-3 text-right">Action</th></tr></thead>
                     <tbody className="divide-y">
@@ -824,7 +933,7 @@ function TakeoffDashboard() {
                               <div className="text-xs text-gray-500">{sup.email}</div>
                             </td>
                             <td className="p-3 text-center">
-                              {isDispatched ? <span className="bg-emerald-50 text-emerald-700 text-xs font-semibold px-2.5 py-1 rounded-full">✓ Dispatched</span> : <span className="text-gray-400 text-xs">Pending</span>}
+                              {isDispatched ? <span className="bg-emerald-50 text-emerald-700 text-xs font-semibold px-2.5 py-1 rounded-full">✓ Draft opened</span> : <span className="text-gray-400 text-xs">Pending</span>}
                             </td>
                             <td className="p-3 text-right">
                               <button onClick={() => handleOpenSupplierGmail(sup)} className={`text-xs px-3.5 py-1.5 rounded font-medium ${isDispatched ? 'bg-gray-700 text-white' : 'bg-red-600 text-white'}`}>
@@ -841,7 +950,7 @@ function TakeoffDashboard() {
                   <button onClick={handleResetTakeoffAndClose} className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded font-semibold">Clear Takeoff & Start New Quote ✕</button>
                   <div className="flex gap-2">
                     <button onClick={() => setWizardStep('PROJECT_NAME')} className="px-3 py-2 rounded text-xs bg-gray-100">← Back</button>
-                    <button onClick={() => setShowRfqWizard(false)} className="px-4 py-2 rounded text-xs text-white bg-blue-600">Done / Return</button>
+                    <button onClick={() => closeRfqWizard()} className="px-4 py-2 rounded text-xs text-white bg-blue-600">Done / Return</button>
                   </div>
                 </div>
               </div>

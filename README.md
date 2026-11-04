@@ -31,6 +31,8 @@ RFQ Managers and Admins can record and delete quotes; all roles can view and com
 
 RFQ Managers and Admins can also start an RFQ from the dashboard by choosing its project and selecting **Create RFQ**; the project RFQ wizard opens directly without first opening the project card.
 
+The RFQ dispatch wizard and list of vendor drafts opened are preserved for the current browser tab session. The “Draft opened” indicator confirms that the email draft was opened from the app; Gmail does not report whether it was sent.
+
 ## Material budgets and invoice extraction
 
 After the authentication and quote migrations are active, apply [`supabase/migrations/20261103220200_project_budgets_and_invoices.sql`](./supabase/migrations/20261103220200_project_budgets_and_invoices.sql) in the Supabase SQL Editor. It adds a manually editable project material budget, immutable invoice records and line-item snapshots, voiding with a reason, and a private `project-invoices` Supabase Storage bucket.
