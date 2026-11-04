@@ -10,14 +10,6 @@ const INVOICE_BUCKET = 'project-invoices'
 const MAX_FILE_SIZE = 20 * 1024 * 1024
 const ACCEPTED_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 
-interface Material {
-  id: string
-  item_number: number | null
-  description: string
-  quantity: number
-  unit: string
-}
-
 interface Supplier {
   id: string
   company_name: string
@@ -26,7 +18,6 @@ interface Supplier {
 
 interface InvoiceItem {
   id: string
-  source_material_id: string | null
   item_number: number | null
   description: string
   quantity: number
@@ -54,7 +45,6 @@ interface Invoice {
 }
 
 interface DraftInvoiceItem {
-  source_material_id: string
   description: string
   quantity: string
   unit: string
@@ -102,7 +92,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isDraftInvoiceItem(value: unknown): value is DraftInvoiceItem {
   return isRecord(value)
-    && typeof value.source_material_id === 'string'
     && typeof value.description === 'string'
     && typeof value.quantity === 'string'
     && typeof value.unit === 'string'
@@ -157,7 +146,7 @@ function currency(amount: number) {
 }
 
 function newDraftItem(): DraftInvoiceItem {
-  return { source_material_id: '', description: '', quantity: '1', unit: 'EA', unit_price: '' }
+  return { description: '', quantity: '1', unit: 'EA', unit_price: '' }
 }
 
 export default function ProjectCostsPage() {
@@ -174,7 +163,6 @@ export default function ProjectCostsPage() {
   const [budgetValue, setBudgetValue] = useState('')
   const [budget, setBudget] = useState<number | null>(null)
   const [budgetSaving, setBudgetSaving] = useState(false)
-  const [materials, setMaterials] = useState<Material[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)
@@ -202,16 +190,14 @@ export default function ProjectCostsPage() {
   const fetchProjectCosts = useCallback(async () => {
     if (!projectId) return
     try {
-      const [projectResult, materialResult, supplierResult, invoiceResult] = await Promise.all([
+      const [projectResult, supplierResult, invoiceResult] = await Promise.all([
         supabase.from('projects').select('name, material_budget').eq('id', projectId).single(),
-        supabase.from('materials').select('id, item_number, description, quantity, unit').eq('project_id', projectId).order('item_number', { ascending: true }),
         supabase.from('suppliers').select('id, company_name, is_active').order('company_name', { ascending: true }),
-        supabase.from('material_invoices').select('id, supplier_id, vendor_name, invoice_number, invoice_date, invoice_total, notes, file_path, file_name, file_mime_type, status, created_at, void_reason, material_invoice_items(id, source_material_id, item_number, description, quantity, unit, unit_price, actual_line_cost, line_total)').eq('project_id', projectId).order('invoice_date', { ascending: false })
+        supabase.from('material_invoices').select('id, supplier_id, vendor_name, invoice_number, invoice_date, invoice_total, notes, file_path, file_name, file_mime_type, status, created_at, void_reason, material_invoice_items(id, item_number, description, quantity, unit, unit_price, actual_line_cost, line_total)').eq('project_id', projectId).order('invoice_date', { ascending: false })
       ])
 
       const failures = [
         projectResult.error && `project: ${projectResult.error.message}`,
-        materialResult.error && `materials: ${materialResult.error.message}`,
         supplierResult.error && `suppliers: ${supplierResult.error.message}`,
         invoiceResult.error && `invoices: ${invoiceResult.error.message}`
       ].filter(Boolean)
@@ -225,7 +211,6 @@ export default function ProjectCostsPage() {
       const currentBudget = projectResult.data?.material_budget
       setBudget(currentBudget == null ? null : Number(currentBudget))
       setBudgetValue(currentBudget == null ? '' : String(currentBudget))
-      setMaterials((materialResult.data || []) as Material[])
       setSuppliers((supplierResult.data || []) as Supplier[])
       setInvoices((invoiceResult.data || []) as unknown as Invoice[])
       setError(null)
@@ -347,13 +332,6 @@ export default function ProjectCostsPage() {
   function handleSupplierChange(id: string) {
     setSupplierId(id)
     if (id) setVendorName(supplierById.get(id) || '')
-  }
-
-  function handleMaterialSelect(index: number, materialId: string) {
-    setDraftItems(current => current.map((item, currentIndex) => {
-      if (currentIndex !== index || item.isTax) return item
-      return { ...item, source_material_id: materialId }
-    }))
   }
 
   function updateDraftItem(index: number, field: keyof DraftInvoiceItem, value: string) {
@@ -491,14 +469,10 @@ export default function ProjectCostsPage() {
       setInvoiceTotal(extracted.invoiceTotal)
       setInvoiceNotes('')
       setDraftItems(extracted.items.map(item => {
-        const source = item.isTax ? undefined : materials.find(material =>
-          material.description.trim().toLowerCase() === item.description.trim().toLowerCase()
-        )
         return {
-          source_material_id: source?.id || '',
           description: item.description,
           quantity: item.quantity,
-          unit: item.unit || source?.unit || 'EA',
+          unit: item.unit || 'EA',
           unit_price: item.unit_price,
           ...(item.actual_line_cost ? { actual_line_cost: item.actual_line_cost } : {}),
           ...(item.isTax ? { isTax: true } : {})
@@ -647,7 +621,7 @@ export default function ProjectCostsPage() {
         return
       }
       parsedItems.push({
-        source_material_id: item.isTax ? null : item.source_material_id || null,
+        source_material_id: null,
         item_number: index + 1,
         description: item.description.trim(),
         quantity,
@@ -905,7 +879,7 @@ export default function ProjectCostsPage() {
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <h3 className="font-semibold text-gray-800">Invoice line items</h3>
-                      <p className="text-xs text-gray-500">Review material lines and invoice charges such as sales tax. Matching materials to the takeoff is optional.</p>
+                      <p className="text-xs text-gray-500">Review material lines and invoice charges such as sales tax.</p>
                     </div>
                     <div className="flex gap-2">
                       <button type="button" disabled={draftItems.some(item => item.isTax)} onClick={addSalesTaxLine} className="rounded border px-3 py-1.5 text-xs font-semibold text-blue-700 disabled:opacity-50">
@@ -922,14 +896,7 @@ export default function ProjectCostsPage() {
                         ? extractedLineCost
                         : calculatedLineTotal
                       return (
-                        <div key={index} className="grid gap-3 rounded-lg border bg-gray-50 p-3 md:grid-cols-12">
-                          <label className="text-xs font-medium text-gray-600 md:col-span-3">
-                            Match takeoff (optional)
-                            <select disabled={item.isTax} value={item.source_material_id} onChange={event => handleMaterialSelect(index, event.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm disabled:bg-gray-100">
-                              <option value="">{item.isTax ? 'Invoice charge' : 'No match'}</option>
-                              {materials.map(material => <option key={material.id} value={material.id}>{material.item_number ?? '—'}. {material.description}</option>)}
-                            </select>
-                          </label>
+                        <div key={index} className="grid gap-3 rounded-lg border bg-gray-50 p-3 md:grid-cols-9">
                           <label className="text-xs font-medium text-gray-600 md:col-span-4">
                             Invoice description
                             <input required value={item.description} onChange={event => updateDraftItem(index, 'description', event.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm" />
