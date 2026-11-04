@@ -23,6 +23,7 @@ export default function Home() {
   const [rfqProjectId, setRfqProjectId] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [savingStatusProjectId, setSavingStatusProjectId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function fetchProjects() {
@@ -69,6 +70,30 @@ export default function Home() {
     event.preventDefault()
     if (!rfqProjectId) return
     router.push(`/projects/${rfqProjectId}?openRfq=1`)
+  }
+
+  async function handleProjectStatusChange(projectId: string, status: string) {
+    setSavingStatusProjectId(projectId)
+    setError(null)
+    try {
+      const { data, error: updateError } = await supabase
+        .from('projects')
+        .update({ status })
+        .eq('id', projectId)
+        .select('id')
+        .single()
+
+      if (updateError || !data) {
+        setError(`Unable to update project status: ${updateError?.message || 'Project was not found.'}`)
+        return
+      }
+
+      setProjects(current => current.map(project => project.id === projectId ? { ...project, status } : project))
+    } catch (updateError) {
+      setError(`Unable to update project status: ${updateError instanceof Error ? updateError.message : 'Unexpected network error.'}`)
+    } finally {
+      setSavingStatusProjectId(null)
+    }
   }
 
   return (
@@ -127,20 +152,44 @@ export default function Home() {
       ) : (
         <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map(project => (
-            <button
+            <article
               key={project.id}
-              onClick={() => router.push(`/projects/${project.id}`)}
               className="rounded-lg border bg-white p-5 text-left shadow-sm transition hover:border-blue-400 hover:bg-blue-50/40"
             >
-              <span className="block text-lg font-semibold text-gray-800">{project.name}</span>
+              <button
+                type="button"
+                onClick={() => router.push(`/projects/${project.id}`)}
+                className="block w-full text-left text-lg font-semibold text-gray-800 hover:text-blue-700"
+              >
+                {project.name}
+              </button>
               <span className="mt-2 block text-xs text-gray-500">
                 {project.job_number ? `Job ${project.job_number}` : 'No job number'}
                 {project.location ? ` · ${project.location}` : ''}
               </span>
-              <span className="mt-3 inline-block rounded bg-gray-100 px-2 py-1 text-xs capitalize text-gray-600">
-                {project.status || 'bidding'}
-              </span>
-            </button>
+              {canCreateProjects ? (
+                <label className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-gray-600">
+                  Status
+                  <select
+                    value={project.status || 'bidding'}
+                    disabled={savingStatusProjectId === project.id}
+                    onChange={event => void handleProjectStatusChange(project.id, event.target.value)}
+                    aria-label={`Status for ${project.name}`}
+                    className="rounded border bg-white px-2 py-1 text-xs capitalize disabled:opacity-60"
+                  >
+                    {!['bidding', 'awarded'].includes((project.status || 'bidding').toLowerCase()) && (
+                      <option value={project.status || ''}>{project.status}</option>
+                    )}
+                    <option value="bidding">Bidding</option>
+                    <option value="awarded">Awarded</option>
+                  </select>
+                </label>
+              ) : (
+                <span className="mt-3 inline-block rounded bg-gray-100 px-2 py-1 text-xs capitalize text-gray-600">
+                  {project.status || 'bidding'}
+                </span>
+              )}
+            </article>
           ))}
           {projects.length === 0 && (
             <p className="rounded-lg border border-dashed p-8 text-sm text-gray-500 sm:col-span-2 lg:col-span-3">
