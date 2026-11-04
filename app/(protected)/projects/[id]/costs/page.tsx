@@ -69,13 +69,58 @@ interface ExtractedInvoice {
     item_number: number
     description: string
     quantity: string
+    quantityEstimated: boolean
     unit: string
     unit_price: string
   }>
 }
 
+interface SavedInvoiceDraft {
+  version: 1
+  filePath: string
+  fileName: string
+  mimeType: string
+  extracted: boolean
+  supplierId: string
+  vendorName: string
+  invoiceNumber: string
+  invoiceDate: string
+  invoiceTotal: string
+  invoiceNotes: string
+  extractionWarnings: string[]
+  draftItems: DraftInvoiceItem[]
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isDraftInvoiceItem(value: unknown): value is DraftInvoiceItem {
+  return isRecord(value)
+    && typeof value.source_material_id === 'string'
+    && typeof value.description === 'string'
+    && typeof value.quantity === 'string'
+    && typeof value.unit === 'string'
+    && typeof value.unit_price === 'string'
+}
+
+function isSavedInvoiceDraft(value: unknown): value is SavedInvoiceDraft {
+  return isRecord(value)
+    && value.version === 1
+    && typeof value.filePath === 'string'
+    && typeof value.fileName === 'string'
+    && ACCEPTED_TYPES.includes(String(value.mimeType))
+    && typeof value.extracted === 'boolean'
+    && typeof value.supplierId === 'string'
+    && typeof value.vendorName === 'string'
+    && typeof value.invoiceNumber === 'string'
+    && typeof value.invoiceDate === 'string'
+    && typeof value.invoiceTotal === 'string'
+    && typeof value.invoiceNotes === 'string'
+    && Array.isArray(value.extractionWarnings)
+    && value.extractionWarnings.every(warning => typeof warning === 'string')
+    && Array.isArray(value.draftItems)
+    && value.draftItems.every(isDraftInvoiceItem)
 }
 
 function isExtractedInvoice(value: unknown): value is ExtractedInvoice {
@@ -92,6 +137,7 @@ function isExtractedInvoice(value: unknown): value is ExtractedInvoice {
     && typeof item.item_number === 'number'
     && typeof item.description === 'string'
     && typeof item.quantity === 'string'
+    && typeof item.quantityEstimated === 'boolean'
     && typeof item.unit === 'string'
     && typeof item.unit_price === 'string'
   )
@@ -108,9 +154,13 @@ function newDraftItem(): DraftInvoiceItem {
 export default function ProjectCostsPage() {
   const params = useParams()
   const projectId = params?.id as string
-  const { roles } = useAuth()
+  const { roles, user } = useAuth()
   const canEditCosts = hasAnyRole(roles, ['ADMIN', 'COST_EDITOR'])
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const draftStorageKey = useMemo(
+    () => user?.id && projectId ? `invoice-draft:v1:${user.id}:${projectId}` : null,
+    [projectId, user?.id]
+  )
   const [projectName, setProjectName] = useState('')
   const [budgetValue, setBudgetValue] = useState('')
   const [budget, setBudget] = useState<number | null>(null)
@@ -130,11 +180,15 @@ export default function ProjectCostsPage() {
   const [invoiceTotal, setInvoiceTotal] = useState('')
   const [invoiceNotes, setInvoiceNotes] = useState('')
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null)
+  const [invoiceFileName, setInvoiceFileName] = useState('')
+  const [invoiceMimeType, setInvoiceMimeType] = useState('')
   const [uploadedFilePath, setUploadedFilePath] = useState<string | null>(null)
+  const [invoiceExtracted, setInvoiceExtracted] = useState(false)
   const [extractionWarnings, setExtractionWarnings] = useState<string[]>([])
   const [draftItems, setDraftItems] = useState<DraftInvoiceItem[]>([newDraftItem()])
   const [totalDifferenceConfirmed, setTotalDifferenceConfirmed] = useState(false)
   const [openingInvoiceId, setOpeningInvoiceId] = useState<string | null>(null)
+  const [restoredDraftKey, setRestoredDraftKey] = useState<string | null>(null)
 
   const fetchProjectCosts = useCallback(async () => {
     if (!projectId) return
@@ -177,6 +231,88 @@ export default function ProjectCostsPage() {
     }, 0)
     return () => window.clearTimeout(timer)
   }, [fetchProjectCosts])
+
+  useEffect(() => {
+    if (!draftStorageKey) return
+
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = window.sessionStorage.getItem(draftStorageKey)
+        if (saved) {
+          const draft: unknown = JSON.parse(saved)
+          if (!isSavedInvoiceDraft(draft) || !draft.filePath.startsWith(`${projectId}/`)) {
+            window.sessionStorage.removeItem(draftStorageKey)
+            setError('The saved invoice draft was invalid and has been cleared. Upload the invoice again to continue.')
+          } else {
+            setUploadedFilePath(draft.filePath)
+            setInvoiceFileName(draft.fileName)
+            setInvoiceMimeType(draft.mimeType)
+            setInvoiceExtracted(draft.extracted)
+            setSupplierId(draft.supplierId)
+            setVendorName(draft.vendorName)
+            setInvoiceNumber(draft.invoiceNumber)
+            setInvoiceDate(draft.invoiceDate)
+            setInvoiceTotal(draft.invoiceTotal)
+            setInvoiceNotes(draft.invoiceNotes)
+            setExtractionWarnings(draft.extractionWarnings)
+            setDraftItems(draft.draftItems)
+            setNotice(draft.extracted
+              ? 'Your invoice draft was restored. Review its details and record it when ready.'
+              : 'Your uploaded invoice was restored. Extract its details to continue.')
+          }
+        }
+      } catch (restoreError) {
+        setError(`Unable to restore the saved invoice draft: ${restoreError instanceof Error ? restoreError.message : 'Browser storage is unavailable.'}`)
+      } finally {
+        setRestoredDraftKey(draftStorageKey)
+      }
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [draftStorageKey, projectId])
+
+  useEffect(() => {
+    if (!draftStorageKey || restoredDraftKey !== draftStorageKey) return
+    try {
+      if (!uploadedFilePath) {
+        window.sessionStorage.removeItem(draftStorageKey)
+        return
+      }
+      const draft: SavedInvoiceDraft = {
+        version: 1,
+        filePath: uploadedFilePath,
+        fileName: invoiceFileName,
+        mimeType: invoiceMimeType,
+        extracted: invoiceExtracted,
+        supplierId,
+        vendorName,
+        invoiceNumber,
+        invoiceDate,
+        invoiceTotal,
+        invoiceNotes,
+        extractionWarnings,
+        draftItems
+      }
+      window.sessionStorage.setItem(draftStorageKey, JSON.stringify(draft))
+    } catch (saveDraftError) {
+      const message = `Unable to preserve the invoice draft in this browser tab: ${saveDraftError instanceof Error ? saveDraftError.message : 'Browser storage is unavailable.'}`
+      window.setTimeout(() => setError(message), 0)
+    }
+  }, [
+    draftStorageKey,
+    restoredDraftKey,
+    uploadedFilePath,
+    invoiceFileName,
+    invoiceMimeType,
+    invoiceExtracted,
+    supplierId,
+    vendorName,
+    invoiceNumber,
+    invoiceDate,
+    invoiceTotal,
+    invoiceNotes,
+    extractionWarnings,
+    draftItems
+  ])
 
   const postedExpenses = useMemo(
     () => invoices.filter(invoice => invoice.status === 'POSTED').reduce((sum, invoice) => sum + Number(invoice.invoice_total), 0),
@@ -235,56 +371,71 @@ export default function ProjectCostsPage() {
   async function handleExtractInvoice() {
     setError(null)
     setNotice(null)
-    setExtractionWarnings([])
     if (!canEditCosts) {
       setError('Only administrators and cost editors may upload invoices.')
       return
     }
-    if (!invoiceFile) {
+    if (!uploadedFilePath && !invoiceFile) {
       setError('Choose an invoice PDF or image first.')
       return
     }
-    if (!ACCEPTED_TYPES.includes(invoiceFile.type) || invoiceFile.size === 0 || invoiceFile.size > MAX_FILE_SIZE) {
+    if (!uploadedFilePath && invoiceFile
+      && (!ACCEPTED_TYPES.includes(invoiceFile.type) || invoiceFile.size === 0 || invoiceFile.size > MAX_FILE_SIZE)) {
       setError('Invoice files must be a non-empty PDF, JPEG, PNG, or WebP no larger than 20 MB.')
       return
     }
 
     setExtractingInvoice(true)
-    let uploadedPath: string | null = null
     try {
       const accessToken = await getAccessToken()
-      const uploadUrlResponse = await fetch(`/api/projects/${projectId}/invoices/upload`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileName: invoiceFile.name, mimeType: invoiceFile.type, size: invoiceFile.size })
-      })
-      const uploadUrlData: unknown = await uploadUrlResponse.json()
-      if (!uploadUrlResponse.ok || !isRecord(uploadUrlData)
-        || typeof uploadUrlData.filePath !== 'string' || typeof uploadUrlData.token !== 'string') {
-        const message = isRecord(uploadUrlData) && typeof uploadUrlData.error === 'string'
-          ? uploadUrlData.error
-          : 'Unable to prepare the private invoice upload.'
-        throw new Error(message)
+      let filePath = uploadedFilePath
+      let fileName = invoiceFileName
+      let mimeType = invoiceMimeType
+
+      if (!filePath && invoiceFile) {
+        const uploadUrlResponse = await fetch(`/api/projects/${projectId}/invoices/upload`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileName: invoiceFile.name, mimeType: invoiceFile.type, size: invoiceFile.size })
+        })
+        const uploadUrlData: unknown = await uploadUrlResponse.json()
+        if (!uploadUrlResponse.ok || !isRecord(uploadUrlData)
+          || typeof uploadUrlData.filePath !== 'string' || typeof uploadUrlData.token !== 'string') {
+          const message = isRecord(uploadUrlData) && typeof uploadUrlData.error === 'string'
+            ? uploadUrlData.error
+            : 'Unable to prepare the private invoice upload.'
+          throw new Error(message)
+        }
+
+        filePath = uploadUrlData.filePath
+        fileName = invoiceFile.name
+        mimeType = invoiceFile.type
+        const { error: uploadError } = await supabase.storage
+          .from(INVOICE_BUCKET)
+          .uploadToSignedUrl(filePath, uploadUrlData.token, invoiceFile, {
+            contentType: mimeType,
+            upsert: false
+          })
+        if (uploadError) throw new Error(`Unable to upload invoice file: ${uploadError.message}`)
+        setUploadedFilePath(filePath)
+        setInvoiceFileName(fileName)
+        setInvoiceMimeType(mimeType)
+        setInvoiceExtracted(false)
+        setInvoiceFile(null)
+        if (fileInputRef.current) fileInputRef.current.value = ''
       }
 
-      const filePath = uploadUrlData.filePath
-      const uploadToken = uploadUrlData.token
-      uploadedPath = filePath
-      const { error: uploadError } = await supabase.storage
-        .from(INVOICE_BUCKET)
-        .uploadToSignedUrl(filePath, uploadToken, invoiceFile, {
-          contentType: invoiceFile.type,
-          upsert: false
-        })
-      if (uploadError) throw new Error(`Unable to upload invoice file: ${uploadError.message}`)
+      if (!filePath || !fileName || !ACCEPTED_TYPES.includes(mimeType)) {
+        throw new Error('The saved invoice upload is missing valid file details. Discard it and upload the invoice again.')
+      }
 
       const extractionResponse = await fetch(`/api/projects/${projectId}/invoices/extract`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           filePath,
-          fileName: invoiceFile.name,
-          mimeType: invoiceFile.type
+          fileName,
+          mimeType
         })
       })
       const extractionData: unknown = await extractionResponse.json()
@@ -317,34 +468,17 @@ export default function ProjectCostsPage() {
           unit_price: item.unit_price
         }
       }))
-      setUploadedFilePath(uploadedPath)
+      setUploadedFilePath(filePath)
+      setInvoiceFileName(fileName)
+      setInvoiceMimeType(mimeType)
+      setInvoiceExtracted(true)
       setExtractionWarnings(Array.isArray(extractionData.warnings)
         ? extractionData.warnings.filter((warning): warning is string => typeof warning === 'string')
         : [])
       setTotalDifferenceConfirmed(false)
-      setNotice('Invoice uploaded and extracted. Review the detected details and line items before recording it.')
+      setNotice('Invoice extracted. Review the detected details and actual line costs before recording it.')
     } catch (extractError) {
-      let cleanupMessage = ''
-      if (uploadedPath) {
-        try {
-          const accessToken = await getAccessToken()
-          const cleanupResponse = await fetch(`/api/projects/${projectId}/invoices/upload`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filePath: uploadedPath })
-          })
-          if (!cleanupResponse.ok) {
-            const cleanupData: unknown = await cleanupResponse.json()
-            const cleanupError = isRecord(cleanupData) && typeof cleanupData.error === 'string'
-              ? cleanupData.error
-              : 'Unknown cleanup error.'
-            cleanupMessage = ` The unused upload could not be removed: ${cleanupError}`
-          }
-        } catch (cleanupError) {
-          cleanupMessage = ` The unused upload could not be removed: ${cleanupError instanceof Error ? cleanupError.message : 'Unexpected cleanup error.'}`
-        }
-      }
-      setError(`${extractError instanceof Error ? extractError.message : 'Unexpected invoice extraction error.'}${cleanupMessage}`)
+      setError(`${extractError instanceof Error ? extractError.message : 'Unexpected invoice extraction error.'} The uploaded file is kept so you can retry without uploading again.`)
     } finally {
       setExtractingInvoice(false)
     }
@@ -369,6 +503,9 @@ export default function ProjectCostsPage() {
         return
       }
       setUploadedFilePath(null)
+      setInvoiceFileName('')
+      setInvoiceMimeType('')
+      setInvoiceExtracted(false)
       setExtractionWarnings([])
       setInvoiceFile(null)
       setSupplierId('')
@@ -429,7 +566,7 @@ export default function ProjectCostsPage() {
       setError('Only administrators and cost editors may record invoices.')
       return
     }
-    if (!invoiceFile || !uploadedFilePath) {
+    if (!uploadedFilePath || !invoiceFileName || !invoiceMimeType || !invoiceExtracted) {
       setError('Upload and extract the invoice before recording it.')
       return
     }
@@ -493,8 +630,8 @@ export default function ProjectCostsPage() {
         p_invoice_total: parsedInvoiceTotal,
         p_notes: invoiceNotes.trim() || null,
         p_file_path: uploadedFilePath,
-        p_file_name: invoiceFile.name,
-        p_file_mime_type: invoiceFile.type,
+        p_file_name: invoiceFileName,
+        p_file_mime_type: invoiceMimeType,
         p_items: parsedItems
       })
 
@@ -511,7 +648,10 @@ export default function ProjectCostsPage() {
       setInvoiceTotal('')
       setInvoiceNotes('')
       setInvoiceFile(null)
+      setInvoiceFileName('')
+      setInvoiceMimeType('')
       setUploadedFilePath(null)
+      setInvoiceExtracted(false)
       setExtractionWarnings([])
       setDraftItems([newDraftItem()])
       setTotalDifferenceConfirmed(false)
@@ -629,7 +769,7 @@ export default function ProjectCostsPage() {
           {canEditCosts && (
             <section className="mb-8 rounded-xl border bg-white p-5 shadow-sm">
               <h2 className="text-lg font-semibold text-gray-800">Record a material invoice</h2>
-              <p className="mt-1 text-xs text-gray-500">Upload a PDF or image to extract invoice details and line items with Google Document AI. Verify the results before posting; only the invoice total counts as the expense.</p>
+              <p className="mt-1 text-xs text-gray-500">Upload a PDF or image to extract invoice details and line items with Google Document AI. We use each invoice line amount as its actual cost; verify the results before posting. Only the invoice total counts as the project expense.</p>
               <div className="mt-5 space-y-5">
                 {!uploadedFilePath ? (
                   <div className="flex flex-wrap items-end gap-3">
@@ -656,15 +796,27 @@ export default function ProjectCostsPage() {
                   </div>
                 ) : (
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">
-                    <span>Uploaded and extracted: <strong>{invoiceFile?.name}</strong></span>
-                    <button
-                      type="button"
-                      disabled={savingInvoice}
-                      onClick={() => void handleDiscardInvoice()}
-                      className="rounded border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
-                    >
-                      Discard and choose another
-                    </button>
+                    <span>{invoiceExtracted ? 'Uploaded and extracted:' : 'Invoice uploaded; extraction can be retried:'} <strong>{invoiceFileName}</strong></span>
+                    <div className="flex gap-2">
+                      {!invoiceExtracted && (
+                        <button
+                          type="button"
+                          disabled={extractingInvoice}
+                          onClick={() => void handleExtractInvoice()}
+                          className="rounded border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
+                        >
+                          {extractingInvoice ? 'Extracting…' : 'Extract details'}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={savingInvoice || extractingInvoice}
+                        onClick={() => void handleDiscardInvoice()}
+                        className="rounded border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
+                      >
+                        Discard and choose another
+                      </button>
+                    </div>
                   </div>
                 )}
                 {extractionWarnings.length > 0 && (
@@ -676,7 +828,7 @@ export default function ProjectCostsPage() {
                   </div>
                 )}
               </div>
-              {uploadedFilePath && (
+              {uploadedFilePath && invoiceExtracted && (
               <form onSubmit={handleSaveInvoice} className="mt-5 space-y-5">
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   <label className="text-sm font-medium text-gray-700">
@@ -739,11 +891,14 @@ export default function ProjectCostsPage() {
                             <input required value={item.unit} onChange={event => updateDraftItem(index, 'unit', event.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm" />
                           </label>
                           <label className="text-xs font-medium text-gray-600 md:col-span-1">
-                            Unit price
+                            Unit cost
                             <input required type="number" min="0" step="0.0001" value={item.unit_price} onChange={event => updateDraftItem(index, 'unit_price', event.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm" />
                           </label>
                           <div className="flex items-end justify-between gap-2 md:col-span-2">
-                            <span className="pb-2 text-sm font-semibold">{Number.isFinite(lineTotal) ? currency(lineTotal) : '—'}</span>
+                            <span className="pb-2 text-sm font-semibold">
+                              <span className="block text-[10px] font-medium uppercase text-gray-500">Line cost</span>
+                              {Number.isFinite(lineTotal) ? currency(lineTotal) : '—'}
+                            </span>
                             <button type="button" disabled={draftItems.length === 1} onClick={() => removeDraftItem(index)} className="mb-1 rounded px-2 py-1 text-xs text-red-700 disabled:opacity-40">Remove</button>
                           </div>
                         </div>
@@ -824,7 +979,7 @@ export default function ProjectCostsPage() {
                     <div className="overflow-x-auto">
                       <table className="w-full min-w-[600px] text-left text-sm">
                         <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-                          <tr><th className="p-3">#</th><th className="p-3">Purchased material</th><th className="p-3">Quantity</th><th className="p-3">Unit price</th><th className="p-3 text-right">Line total</th></tr>
+                          <tr><th className="p-3">#</th><th className="p-3">Purchased material</th><th className="p-3">Quantity</th><th className="p-3">Unit cost</th><th className="p-3 text-right">Actual line cost</th></tr>
                         </thead>
                         <tbody className="divide-y">
                           {(invoice.material_invoice_items || []).map((item, index) => (

@@ -148,6 +148,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     const invoiceNumber = findEntity(entities, 'invoice_id', 'invoice_number')
     const invoiceDate = findEntity(entities, 'invoice_date')
     const invoiceTotal = findEntity(entities, 'total_amount', 'invoice_total')
+    let linesWithoutExtractedQuantity = 0
     const lineItems = entities.filter(entity => entity.type === 'line_item').map((entity, index) => {
       const fields = entity.properties || []
       const description = findLineProperty(fields, ['/description', '/product_code'])
@@ -158,13 +159,17 @@ export async function POST(request: Request, { params }: RouteContext) {
       const quantityValue = parseAmount(quantity ? entityValue(quantity) : '')
       const amountValue = parseAmount(amount ? entityValue(amount) : '')
       const priceValue = parseAmount(unitPrice ? entityValue(unitPrice) : '')
-      const inferredPrice = priceValue ?? (amountValue != null && quantityValue != null && quantityValue > 0
-        ? amountValue / quantityValue
-        : amountValue)
+      const quantityEstimated = quantityValue == null || quantityValue <= 0
+      if (quantityEstimated) linesWithoutExtractedQuantity += 1
+      const savedQuantity = quantityValue != null && quantityValue > 0 ? quantityValue : 1
+      const inferredPrice = amountValue != null
+        ? amountValue / savedQuantity
+        : priceValue
       return {
         item_number: index + 1,
         description: description ? entityValue(description) : '',
-        quantity: quantityValue == null ? '' : String(quantityValue),
+        quantity: String(savedQuantity),
+        quantityEstimated,
         unit: unit ? entityValue(unit) : 'EA',
         unit_price: inferredPrice == null ? '' : String(inferredPrice)
       }
@@ -184,8 +189,11 @@ export async function POST(request: Request, { params }: RouteContext) {
     if (!extracted.invoiceDate) warnings.push('Invoice date was not confidently extracted.')
     if (!extracted.invoiceTotal) warnings.push('Invoice total was not confidently extracted.')
     if (lineItems.length === 0) warnings.push('No invoice line items were detected.')
-    else if (lineItems.some(item => !item.description || !item.quantity || !item.unit_price)) {
-      warnings.push('Some line items are missing descriptions, quantities, or unit prices. Review them before recording.')
+    else if (lineItems.some(item => !item.description || !item.unit_price)) {
+      warnings.push('Some line items are missing descriptions or actual costs. Review them before recording.')
+    }
+    if (linesWithoutExtractedQuantity > 0) {
+      warnings.push(`${linesWithoutExtractedQuantity} line item${linesWithoutExtractedQuantity === 1 ? ' had' : 's had'} no detected quantity. Those lines are set to quantity 1 while preserving the extracted actual line amount.`)
     }
 
     return NextResponse.json({ extracted, warnings })
