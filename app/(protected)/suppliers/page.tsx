@@ -1,7 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import { hasAnyRole, useAuth } from '@/lib/auth-context'
 
 interface Supplier {
   id: string
@@ -13,6 +15,8 @@ interface Supplier {
 }
 
 export default function SuppliersPage() {
+  const { roles } = useAuth()
+  const canManageSuppliers = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [form, setForm] = useState({
     company_name: '',
@@ -85,11 +89,12 @@ export default function SuppliersPage() {
           <h1 className="text-2xl font-bold text-gray-800">Supplier & Sales Rep Directory</h1>
           <p className="text-xs text-gray-500 mt-1">Manage vendor contacts and direct email dispatch addresses</p>
         </div>
-        <a href="/" className="text-xs text-blue-600 hover:underline font-semibold">
+        <Link href="/" className="text-xs text-blue-600 hover:underline font-semibold">
           ← Back to Dashboard
-        </a>
+        </Link>
       </div>
 
+      {canManageSuppliers && <>
       {/* Add Supplier Form */}
       <div className="bg-gray-50 p-4 rounded-lg border mb-8">
         <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3">Add New Supplier / Sales Rep</h3>
@@ -146,6 +151,7 @@ export default function SuppliersPage() {
           </div>
         </form>
       </div>
+      </>}
 
       {/* Supplier Directory Table */}
       <div className="bg-white border rounded-lg overflow-hidden shadow-sm">
@@ -156,7 +162,7 @@ export default function SuppliersPage() {
               <th className="p-3">Sales Rep</th>
               <th className="p-3">Email</th>
               <th className="p-3">Specialties</th>
-              <th className="p-3 text-right">Action</th>
+              {canManageSuppliers && <th className="p-3 text-right">Action</th>}
             </tr>
           </thead>
           <tbody className="divide-y text-sm">
@@ -170,20 +176,20 @@ export default function SuppliersPage() {
                     ? sup.specialties.join(', ')
                     : 'General'}
                 </td>
-                <td className="p-3 text-right">
+                {canManageSuppliers && <td className="p-3 text-right">
                   <button
                     onClick={() => handleDeleteSupplier(sup.id, sup.company_name)}
                     className="text-xs bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-3 py-1 rounded font-medium transition-colors"
                   >
                     Delete ✕
                   </button>
-                </td>
+                </td>}
               </tr>
             ))}
             {suppliers.length === 0 && (
               <tr>
-                <td colSpan={5} className="p-6 text-center text-gray-400">
-                  No suppliers found. Use the form above to add your primary vendors.
+                <td colSpan={canManageSuppliers ? 5 : 4} className="p-6 text-center text-gray-400">
+                  No suppliers found. {canManageSuppliers ? 'Use the form above to add your primary vendors.' : ''}
                 </td>
               </tr>
             )}

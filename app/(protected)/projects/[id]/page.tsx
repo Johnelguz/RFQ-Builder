@@ -1,8 +1,10 @@
 'use client'
 
-import { useState, useEffect, useRef, Suspense } from 'react'
+import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
+import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { hasAnyRole, useAuth } from '@/lib/auth-context'
 
 interface Material {
   id: string
@@ -36,6 +38,8 @@ interface CatalogItem {
 function TakeoffDashboard() {
   const params = useParams()
   const projectId = params?.id as string
+  const { roles } = useAuth()
+  const canManageRfqs = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
   
   const [projectName, setProjectName] = useState<string>('')
   const [materials, setMaterials] = useState<Material[]>([])
@@ -81,15 +85,6 @@ function TakeoffDashboard() {
   const [preparations, setPreparations] = useState<string[]>([])
 
   useEffect(() => {
-    if (projectId) {
-      fetchProjectDetails()
-      fetchMaterials()
-      fetchSuppliers()
-      fetchCatalog()
-    }
-  }, [projectId])
-
-  useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setShowCatalogDropdown(false)
@@ -99,26 +94,38 @@ function TakeoffDashboard() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  async function fetchProjectDetails() {
+  const fetchProjectDetails = useCallback(async () => {
     if (!projectId) return
     const { data } = await supabase.from('projects').select('name').eq('id', projectId).single()
     if (data?.name) setProjectName(data.name)
-  }
+  }, [projectId])
 
-  async function fetchMaterials() {
+  const fetchMaterials = useCallback(async () => {
     const { data } = await supabase.from('materials').select('*').eq('project_id', projectId).order('item_number', { ascending: true })
     if (data) setMaterials(data)
-  }
+  }, [projectId])
 
-  async function fetchSuppliers() {
+  const fetchSuppliers = useCallback(async () => {
     const { data } = await supabase.from('suppliers').select('*').eq('is_active', true)
     if (data) setSuppliers(data)
-  }
+  }, [])
 
-  async function fetchCatalog() {
+  const fetchCatalog = useCallback(async () => {
     const { data } = await supabase.from('material_catalog').select('*').order('description', { ascending: true })
     if (data) setCatalogItems(data)
-  }
+  }, [])
+
+  useEffect(() => {
+    if (projectId) {
+      const timer = window.setTimeout(() => {
+        void fetchProjectDetails()
+        void fetchMaterials()
+        void fetchSuppliers()
+        void fetchCatalog()
+      }, 0)
+      return () => window.clearTimeout(timer)
+    }
+  }, [projectId, fetchProjectDetails, fetchMaterials, fetchSuppliers, fetchCatalog])
 
   const filteredCatalog = catalogItems.filter(item => {
     const query = form.description.toLowerCase()
@@ -326,7 +333,7 @@ function TakeoffDashboard() {
     const emailBody = getEmailBodyText(sup)
     if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
       const mailtoUrl = `mailto:${sup.email}?subject=${encodeURIComponent(subjectLine)}&body=${encodeURIComponent(emailBody)}`
-      window.location.href = mailtoUrl
+      window.location.assign(mailtoUrl)
       return
     }
 
@@ -358,9 +365,9 @@ function TakeoffDashboard() {
             <span className="bg-amber-100 text-amber-800 text-[10px] font-mono px-2 py-0.5 rounded font-bold">v2.5.6 Active</span>
           </div>
           <div className="flex gap-4 mt-2">
-            <a href="/" className="text-xs text-blue-600 hover:underline font-semibold">← Dashboard</a>
-            <a href="/suppliers" className="text-xs text-blue-600 hover:underline font-semibold">⚙️ Suppliers</a>
-            <a href="/history" className="text-xs text-blue-600 hover:underline font-semibold">📁 Sent RFQ History</a>
+            <Link href="/" className="text-xs text-blue-600 hover:underline font-semibold">← Dashboard</Link>
+            <Link href="/suppliers" className="text-xs text-blue-600 hover:underline font-semibold">⚙️ Suppliers</Link>
+            <Link href="/history" className="text-xs text-blue-600 hover:underline font-semibold">📁 Sent RFQ History</Link>
           </div>
         </div>
         <button onClick={() => setShowCatalogModal(true)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 shadow-sm">
@@ -368,6 +375,8 @@ function TakeoffDashboard() {
         </button>
       </div>
 
+      {canManageRfqs ? (
+      <>
       {/* Tab Switcher */}
       <div className="mb-6 flex border-b">
         <button
@@ -601,12 +610,18 @@ function TakeoffDashboard() {
           </form>
         </div>
       )}
+      </>
+      ) : (
+        <p className="mb-6 rounded-lg border bg-gray-50 p-4 text-sm text-gray-600">
+          You have read-only access to this project takeoff.
+        </p>
+      )}
 
       {/* Section 2: Compiled Takeoff Table */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">2. Compiled Project Material Takeoff ({materials.length} items)</h3>
-          {materials.length > 0 && (
+          {canManageRfqs && materials.length > 0 && (
             <button onClick={handleClearAllMaterials} className="text-xs font-semibold text-red-600 hover:text-red-800 bg-red-50 px-2.5 py-1 rounded">
               Clear Takeoff ✕
             </button>
@@ -622,7 +637,7 @@ function TakeoffDashboard() {
                 <th className="p-3">Manufacturer & Model #</th>
                 <th className="p-3">Sheet Ref</th>
                 <th className="p-3">Notes</th>
-                <th className="p-3 text-right">Action</th>
+                {canManageRfqs && <th className="p-3 text-right">Action</th>}
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -631,7 +646,7 @@ function TakeoffDashboard() {
                   <td className="p-3 font-medium text-gray-500">{item.item_number}</td>
                   <td className="p-3 font-semibold">
                     <div className="flex items-center gap-1.5">
-                      <input type="number" step="any" value={item.quantity} onChange={e => handleUpdateQuantity(item.id, parseFloat(e.target.value))} className="w-20 p-1 border rounded text-sm font-bold bg-white" />
+                      <input type="number" step="any" value={item.quantity} readOnly={!canManageRfqs} onChange={e => handleUpdateQuantity(item.id, parseFloat(e.target.value))} className="w-20 p-1 border rounded text-sm font-bold bg-white read-only:border-transparent read-only:bg-transparent" />
                       <span className="text-xs text-gray-600 uppercase">{item.unit}</span>
                     </div>
                   </td>
@@ -639,19 +654,19 @@ function TakeoffDashboard() {
                   <td className="p-3 text-gray-600">{item.manufacturer} <span className="font-mono text-xs bg-gray-100 px-1 rounded">{item.model_number}</span></td>
                   <td className="p-3"><span className="bg-blue-50 text-blue-700 text-xs px-2 py-1 rounded font-medium">{item.sheet_reference}</span></td>
                   <td className="p-3 text-gray-500 text-xs">{item.notes}</td>
-                  <td className="p-3 text-right">
+                  {canManageRfqs && <td className="p-3 text-right">
                     <button onClick={() => handleDeleteMaterial(item.id)} className="text-gray-400 hover:text-red-600 text-xs font-bold p-1">✕</button>
-                  </td>
+                  </td>}
                 </tr>
               ))}
               {materials.length === 0 && (
-                <tr><td colSpan={7} className="p-6 text-center text-gray-400">No items added yet. Use standard entry or wire order app tab above.</td></tr>
+                <tr><td colSpan={canManageRfqs ? 7 : 6} className="p-6 text-center text-gray-400">{canManageRfqs ? 'No items added yet. Use standard entry or wire order app tab above.' : 'No material takeoff items are recorded for this project.'}</td></tr>
               )}
             </tbody>
           </table>
         </div>
 
-        {materials.length > 0 && (
+        {canManageRfqs && materials.length > 0 && (
           <div className="mt-4 flex justify-end">
             <button onClick={handleOpenRfqWizard} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-base px-6 py-3 rounded-lg shadow-md flex items-center gap-2">
               ✉️ Generate RFQs ({materials.length} Line Items) ➔
@@ -661,7 +676,7 @@ function TakeoffDashboard() {
       </div>
 
       {/* RFQ Wizard Modal */}
-      {showRfqWizard && (
+      {canManageRfqs && showRfqWizard && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl max-w-2xl w-full p-6 shadow-2xl flex flex-col">
             {wizardStep === 'PROJECT_NAME' && (
@@ -749,7 +764,7 @@ function TakeoffDashboard() {
                     <div className="font-semibold text-sm text-gray-800">{cat.description}</div>
                     <div className="text-xs text-gray-500">{cat.manufacturer} <span className="font-mono">{cat.model_number}</span> • Unit: <span className="font-bold">{cat.default_unit}</span></div>
                   </div>
-                  <button onClick={() => handleDeleteCatalogItem(cat.id)} className="bg-red-50 text-red-600 text-xs px-2.5 py-1.5 rounded">Delete</button>
+                  {canManageRfqs && <button onClick={() => handleDeleteCatalogItem(cat.id)} className="bg-red-50 text-red-600 text-xs px-2.5 py-1.5 rounded">Delete</button>}
                 </div>
               ))}
             </div>

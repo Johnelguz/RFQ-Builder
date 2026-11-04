@@ -1,7 +1,10 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { hasAnyRole, useAuth } from '@/lib/auth-context'
 
 interface RFQHistoryItem {
   id: string
@@ -32,15 +35,13 @@ interface RFQHistoryItem {
 }
 
 export default function RFQHistoryPage() {
+  const router = useRouter()
+  const { roles } = useAuth()
+  const canManageRfqs = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
   const [history, setHistory] = useState<RFQHistoryItem[]>([])
   const [loading, setLoading] = useState<boolean>(true)
 
-  useEffect(() => {
-    fetchRFQHistory()
-  }, [])
-
   async function fetchRFQHistory() {
-    setLoading(true)
     const { data, error } = await supabase
       .from('rfq_batches')
       .select(`
@@ -73,6 +74,11 @@ export default function RFQHistoryPage() {
     }
     setLoading(false)
   }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void fetchRFQHistory(), 0)
+    return () => window.clearTimeout(timer)
+  }, [])
 
   async function handleReloadBatchIntoProject(batch: RFQHistoryItem) {
     if (!batch.project_id) {
@@ -111,7 +117,7 @@ export default function RFQHistoryPage() {
     }
 
     alert(`Successfully loaded ${successCount} items into the project takeoff!`)
-    window.location.href = `/projects/${batch.project_id}`
+    router.push(`/projects/${batch.project_id}`)
   }
 
   async function handleDeleteBatch(batchId: string) {
@@ -148,7 +154,7 @@ export default function RFQHistoryPage() {
           <p className="text-xs text-gray-500 mt-1">Review dispatched material packages, reload past orders for resending, and clear records as jobs close.</p>
         </div>
         <div className="flex items-center gap-3">
-          {history.length > 0 && (
+          {canManageRfqs && history.length > 0 && (
             <button
               onClick={handleClearAllHistory}
               className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-3 py-2 rounded-lg text-xs font-semibold transition-colors"
@@ -156,9 +162,9 @@ export default function RFQHistoryPage() {
               Clear All RFQ Records ✕
             </button>
           )}
-          <a href="/" className="text-xs text-blue-600 hover:underline font-semibold bg-gray-50 border px-3 py-2 rounded-lg">
+          <Link href="/" className="text-xs text-blue-600 hover:underline font-semibold bg-gray-50 border px-3 py-2 rounded-lg">
             ← Back to Dashboard
-          </a>
+          </Link>
         </div>
       </div>
 
@@ -188,20 +194,20 @@ export default function RFQHistoryPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <button
+                    {canManageRfqs && <button
                       onClick={() => handleReloadBatchIntoProject(batch)}
                       className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors shadow-xs"
                       title="Load these items back into the active takeoff list"
                     >
                       🔄 Load into Active Takeoff ➔
-                    </button>
-                    <button
+                    </button>}
+                    {canManageRfqs && <button
                       onClick={() => handleDeleteBatch(batch.id)}
                       className="text-xs text-gray-400 hover:text-red-600 font-bold p-1 transition-colors"
                       title="Delete RFQ Record"
                     >
                       ✕
-                    </button>
+                    </button>}
                   </div>
                 </div>
 
