@@ -29,6 +29,14 @@ After the authentication migration is active, apply [`supabase/migrations/202611
 
 RFQ Managers and Admins can record and delete quotes; all roles can view and compare them. Open a project, then choose **Vendor Quotes**. A recorded quote is independent from later takeoff edits.
 
+## Manual material budgets and invoices
+
+After the authentication and quote migrations are active, apply [`supabase/migrations/20261103220200_project_budgets_and_invoices.sql`](./supabase/migrations/20261103220200_project_budgets_and_invoices.sql) in the Supabase SQL Editor. It adds a manually editable project material budget, immutable invoice records and line-item snapshots, voiding with a reason, and a private `project-invoices` Supabase Storage bucket.
+
+Admins and Cost Editors can set a project budget and record invoices. Invoice line details do not count as separate expenses: only the posted invoice header total is subtracted from the budget. A voided invoice remains visible but is excluded from expense totals. Invoice files are private and available to signed-in team members using short-lived signed links. The initial workflow is manual entry; it does not send documents to an external extraction service.
+
+Open a project and choose **Material Costs** to set the budget, upload a PDF or image invoice (20 MB maximum), enter its material lines, and review any difference between line-item totals and the invoice total before saving.
+
 ## Roles
 
 Roles can be combined:
@@ -38,8 +46,8 @@ Roles can be combined:
 | Admin | Manage all app data, invite users, and assign roles |
 | RFQ Manager | Create projects, edit material takeoffs, manage suppliers, and create/manage RFQs |
 | Reviewer | View project takeoffs, RFQ history, and vendor quote comparisons |
-| Cost Editor | View project, RFQ, and vendor quote data; budget and invoice editing will be added in a later phase |
-| Viewer | Read-only access to project, RFQ, and vendor quote data |
+| Cost Editor | View all data; set manual material budgets, record invoices, and void invoices |
+| Viewer | Read-only access to project, RFQ, quote, budget, and invoice data |
 
 Database policies are the security boundary. Hiding controls in the UI is only for usability.
 
