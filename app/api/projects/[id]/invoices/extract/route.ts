@@ -212,7 +212,7 @@ export async function POST(request: Request, { params }: RouteContext) {
         quantity: savedQuantity,
         quantityEstimated,
         unit: unit ? entityValue(unit) : 'EA',
-        unit_price: inferredPrice == null ? '' : String(inferredPrice),
+        unit_price: inferredPrice == null ? '' : inferredPrice.toFixed(2),
         ...(amountValue == null ? {} : { actual_line_cost: amountValue.toFixed(2) })
       }
     }).filter(item => item.description || item.quantity || item.unit_price || item.actual_line_cost)

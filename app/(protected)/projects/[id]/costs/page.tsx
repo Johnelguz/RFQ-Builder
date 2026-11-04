@@ -342,7 +342,7 @@ export default function ProjectCostsPage() {
         const quantity = Number(value)
         const actualLineCost = Number(item.actual_line_cost)
         updated.unit_price = Number.isFinite(quantity) && quantity > 0 && Number.isFinite(actualLineCost)
-          ? (actualLineCost / quantity).toFixed(4)
+          ? (actualLineCost / quantity).toFixed(2)
           : ''
       } else if (field === 'unit_price') {
         delete updated.actual_line_cost
@@ -613,7 +613,7 @@ export default function ProjectCostsPage() {
       const enteredUnitPrice = Number(item.unit_price)
       const hasValidActualLineCost = actualLineCost != null && Number.isFinite(actualLineCost) && actualLineCost >= 0
       const unitPrice = hasValidActualLineCost && quantity > 0
-        ? actualLineCost / quantity
+        ? Number((actualLineCost / quantity).toFixed(2))
         : enteredUnitPrice
       if (!item.description.trim() || !item.quantity.trim() || !Number.isFinite(quantity) || quantity < 0 || !item.unit.trim()
         || (!hasValidActualLineCost && (!item.unit_price.trim() || !Number.isFinite(unitPrice) || unitPrice < 0))) {
@@ -911,7 +911,7 @@ export default function ProjectCostsPage() {
                           </label>
                           <label className="text-xs font-medium text-gray-600 md:col-span-1">
                             Unit cost
-                            <input required={!item.actual_line_cost} type="number" min="0" step="0.0001" value={item.unit_price} onChange={event => updateDraftItem(index, 'unit_price', event.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm" />
+                            <input required={!item.actual_line_cost} type="number" min="0" step="0.01" value={item.unit_price} onChange={event => updateDraftItem(index, 'unit_price', event.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm" />
                           </label>
                           <div className="flex items-end justify-between gap-2 md:col-span-2">
                             <span className="pb-2 text-sm font-semibold">
