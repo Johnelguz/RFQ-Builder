@@ -40,6 +40,23 @@ function parseAmount(value: string) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function parseQuantity(value: string) {
+  const parsed = parseAmount(value)
+  if (parsed != null) return parsed
+
+  const fraction = value.trim().match(/^(\d[\d,]*(?:\.\d+)?)\s*\/\s*(\d[\d,]*(?:\.\d+)?)/)
+  if (fraction) {
+    const numerator = Number(fraction[1].replace(/,/g, ''))
+    const denominator = Number(fraction[2].replace(/,/g, ''))
+    return denominator === 0 ? null : numerator / denominator
+  }
+
+  const numericPrefix = value.trim().match(/^(\d[\d,]*(?:\.\d+)?)/)
+  if (!numericPrefix) return null
+  const quantity = Number(numericPrefix[1].replace(/,/g, ''))
+  return Number.isFinite(quantity) ? quantity : null
+}
+
 function dateToIso(value: string) {
   let year: number
   let month: number
@@ -148,32 +165,70 @@ export async function POST(request: Request, { params }: RouteContext) {
     const invoiceNumber = findEntity(entities, 'invoice_id', 'invoice_number')
     const invoiceDate = findEntity(entities, 'invoice_date')
     const invoiceTotal = findEntity(entities, 'total_amount', 'invoice_total')
+    const invoiceTax = findEntity(entities, 'total_tax_amount', 'tax_amount')
     let linesWithoutExtractedQuantity = 0
-    const lineItems = entities.filter(entity => entity.type === 'line_item').map((entity, index) => {
+    let linesWithEstimatedQuantity = 0
+    const lineItems: Array<{
+      item_number: number
+      description: string
+      quantity: string
+      quantityEstimated: boolean
+      unit: string
+      unit_price: string
+      actual_line_cost?: string
+      isTax?: boolean
+    }> = entities.filter(entity => entity.type === 'line_item').map((entity, index) => {
       const fields = entity.properties || []
-      const description = findLineProperty(fields, ['/description', '/product_code'])
+      const description = findLineProperty(fields, ['/description'])
+        || findLineProperty(fields, ['/product_code'])
       const quantity = findLineProperty(fields, ['/quantity'])
       const unit = findLineProperty(fields, ['/unit'])
       const unitPrice = findLineProperty(fields, ['/unit_price'])
       const amount = findLineProperty(fields, ['/amount'])
-      const quantityValue = parseAmount(quantity ? entityValue(quantity) : '')
+      const quantityValue = parseQuantity(quantity ? entityValue(quantity) : '')
       const amountValue = parseAmount(amount ? entityValue(amount) : '')
       const priceValue = parseAmount(unitPrice ? entityValue(unitPrice) : '')
+      const inferredQuantity = amountValue != null && priceValue != null && priceValue > 0
+        ? amountValue / priceValue
+        : null
       const quantityEstimated = quantityValue == null || quantityValue <= 0
-      if (quantityEstimated) linesWithoutExtractedQuantity += 1
-      const savedQuantity = quantityValue != null && quantityValue > 0 ? quantityValue : 1
-      const inferredPrice = amountValue != null
-        ? amountValue / savedQuantity
+      const quantityInferred = quantityEstimated && inferredQuantity != null
+        && Number.isFinite(inferredQuantity) && inferredQuantity > 0
+      if (quantityEstimated) {
+        if (quantityInferred) linesWithEstimatedQuantity += 1
+        else linesWithoutExtractedQuantity += 1
+      }
+      const savedQuantity = quantityValue != null && quantityValue > 0
+        ? String(quantityValue)
+        : quantityInferred
+          ? Number(inferredQuantity.toFixed(4)).toString()
+          : ''
+      const inferredPrice = amountValue != null && savedQuantity
+        ? amountValue / Number(savedQuantity)
         : priceValue
       return {
         item_number: index + 1,
         description: description ? entityValue(description) : '',
-        quantity: String(savedQuantity),
+        quantity: savedQuantity,
         quantityEstimated,
         unit: unit ? entityValue(unit) : 'EA',
-        unit_price: inferredPrice == null ? '' : String(inferredPrice)
+        unit_price: inferredPrice == null ? '' : String(inferredPrice),
+        ...(amountValue == null ? {} : { actual_line_cost: amountValue.toFixed(2) })
       }
-    }).filter(item => item.description || item.quantity || item.unit_price)
+    }).filter(item => item.description || item.quantity || item.unit_price || item.actual_line_cost)
+    const taxAmount = parseAmount(invoiceTax ? entityValue(invoiceTax) : '')
+    if (taxAmount != null && taxAmount > 0) {
+      lineItems.push({
+        item_number: lineItems.length + 1,
+        description: 'Sales tax',
+        quantity: '1',
+        quantityEstimated: false,
+        unit: 'TAX',
+        unit_price: taxAmount.toFixed(2),
+        actual_line_cost: taxAmount.toFixed(2),
+        isTax: true
+      })
+    }
 
     const extractedTotal = parseAmount(invoiceTotal ? entityValue(invoiceTotal) : '')
     const extractedDate = dateToIso(invoiceDate ? entityValue(invoiceDate) : '')
@@ -189,11 +244,14 @@ export async function POST(request: Request, { params }: RouteContext) {
     if (!extracted.invoiceDate) warnings.push('Invoice date was not confidently extracted.')
     if (!extracted.invoiceTotal) warnings.push('Invoice total was not confidently extracted.')
     if (lineItems.length === 0) warnings.push('No invoice line items were detected.')
-    else if (lineItems.some(item => !item.description || !item.unit_price)) {
+    else if (lineItems.some(item => !item.description || (!item.unit_price && !item.actual_line_cost))) {
       warnings.push('Some line items are missing descriptions or actual costs. Review them before recording.')
     }
+    if (linesWithEstimatedQuantity > 0) {
+      warnings.push(`${linesWithEstimatedQuantity} line item quantity${linesWithEstimatedQuantity === 1 ? ' was' : 'ies were'} estimated from the extracted line amount and unit price. Review before recording.`)
+    }
     if (linesWithoutExtractedQuantity > 0) {
-      warnings.push(`${linesWithoutExtractedQuantity} line item${linesWithoutExtractedQuantity === 1 ? ' had' : 's had'} no detected quantity. Those lines are set to quantity 1 while preserving the extracted actual line amount.`)
+      warnings.push(`${linesWithoutExtractedQuantity} line item${linesWithoutExtractedQuantity === 1 ? ' has' : 's have'} no detected or derivable quantity. The quantity is left blank, the extracted actual line amount is preserved, and a quantity is required before recording.`)
     }
 
     return NextResponse.json({ extracted, warnings })

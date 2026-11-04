@@ -58,6 +58,8 @@ interface DraftInvoiceItem {
   quantity: string
   unit: string
   unit_price: string
+  actual_line_cost?: string
+  isTax?: boolean
 }
 
 interface ExtractedInvoice {
@@ -72,6 +74,8 @@ interface ExtractedInvoice {
     quantityEstimated: boolean
     unit: string
     unit_price: string
+    actual_line_cost?: string
+    isTax?: boolean
   }>
 }
 
@@ -102,6 +106,8 @@ function isDraftInvoiceItem(value: unknown): value is DraftInvoiceItem {
     && typeof value.quantity === 'string'
     && typeof value.unit === 'string'
     && typeof value.unit_price === 'string'
+    && (value.actual_line_cost === undefined || typeof value.actual_line_cost === 'string')
+    && (value.isTax === undefined || typeof value.isTax === 'boolean')
 }
 
 function isSavedInvoiceDraft(value: unknown): value is SavedInvoiceDraft {
@@ -140,6 +146,8 @@ function isExtractedInvoice(value: unknown): value is ExtractedInvoice {
     && typeof item.quantityEstimated === 'boolean'
     && typeof item.unit === 'string'
     && typeof item.unit_price === 'string'
+    && (item.actual_line_cost === undefined || typeof item.actual_line_cost === 'string')
+    && (item.isTax === undefined || typeof item.isTax === 'boolean')
   )
 }
 
@@ -323,6 +331,8 @@ export default function ProjectCostsPage() {
     () => draftItems.reduce((sum, item) => {
       const quantity = Number(item.quantity)
       const price = Number(item.unit_price)
+      const actualLineCost = item.actual_line_cost?.trim() ? Number(item.actual_line_cost) : null
+      if (actualLineCost != null && Number.isFinite(actualLineCost) && actualLineCost >= 0) return sum + actualLineCost
       return sum + (Number.isFinite(quantity) && quantity > 0 && Number.isFinite(price) && price >= 0 ? quantity * price : 0)
     }, 0),
     [draftItems]
@@ -340,20 +350,43 @@ export default function ProjectCostsPage() {
 
   function handleMaterialSelect(index: number, materialId: string) {
     setDraftItems(current => current.map((item, currentIndex) => {
-      if (currentIndex !== index) return item
+      if (currentIndex !== index || item.isTax) return item
       return { ...item, source_material_id: materialId }
     }))
   }
 
   function updateDraftItem(index: number, field: keyof DraftInvoiceItem, value: string) {
-    setDraftItems(current => current.map((item, currentIndex) => currentIndex === index
-      ? { ...item, [field]: value }
-      : item))
+    setDraftItems(current => current.map((item, currentIndex) => {
+      if (currentIndex !== index) return item
+      const updated = { ...item, [field]: value }
+      if (field === 'quantity' && item.actual_line_cost) {
+        const quantity = Number(value)
+        const actualLineCost = Number(item.actual_line_cost)
+        updated.unit_price = Number.isFinite(quantity) && quantity > 0 && Number.isFinite(actualLineCost)
+          ? (actualLineCost / quantity).toFixed(4)
+          : ''
+      } else if (field === 'unit_price') {
+        delete updated.actual_line_cost
+      }
+      return updated
+    }))
     if (field === 'quantity' || field === 'unit_price') setTotalDifferenceConfirmed(false)
   }
 
   function addDraftItem() {
     setDraftItems(current => [...current, newDraftItem()])
+  }
+
+  function addSalesTaxLine() {
+    setDraftItems(current => current.some(item => item.isTax)
+      ? current
+      : [...current, {
+        ...newDraftItem(),
+        description: 'Sales tax',
+        unit: 'TAX',
+        isTax: true
+      }])
+    setTotalDifferenceConfirmed(false)
   }
 
   function removeDraftItem(index: number) {
@@ -457,7 +490,7 @@ export default function ProjectCostsPage() {
       setInvoiceTotal(extracted.invoiceTotal)
       setInvoiceNotes('')
       setDraftItems(extracted.items.map(item => {
-        const source = materials.find(material =>
+        const source = item.isTax ? undefined : materials.find(material =>
           material.description.trim().toLowerCase() === item.description.trim().toLowerCase()
         )
         return {
@@ -465,7 +498,9 @@ export default function ProjectCostsPage() {
           description: item.description,
           quantity: item.quantity,
           unit: item.unit || source?.unit || 'EA',
-          unit_price: item.unit_price
+          unit_price: item.unit_price,
+          ...(item.actual_line_cost ? { actual_line_cost: item.actual_line_cost } : {}),
+          ...(item.isTax ? { isTax: true } : {})
         }
       }))
       setUploadedFilePath(filePath)
@@ -598,14 +633,19 @@ export default function ProjectCostsPage() {
     }> = []
     for (const [index, item] of draftItems.entries()) {
       const quantity = Number(item.quantity)
-      const unitPrice = Number(item.unit_price)
+      const actualLineCost = item.actual_line_cost?.trim() ? Number(item.actual_line_cost) : null
+      const enteredUnitPrice = Number(item.unit_price)
+      const hasValidActualLineCost = actualLineCost != null && Number.isFinite(actualLineCost) && actualLineCost >= 0
+      const unitPrice = hasValidActualLineCost && quantity > 0
+        ? actualLineCost / quantity
+        : enteredUnitPrice
       if (!item.description.trim() || !Number.isFinite(quantity) || quantity <= 0 || !item.unit.trim()
-        || !item.unit_price.trim() || !Number.isFinite(unitPrice) || unitPrice < 0) {
-        setError(`Complete the description, quantity, unit, and unit price for invoice line ${index + 1}.`)
+        || (!hasValidActualLineCost && (!item.unit_price.trim() || !Number.isFinite(unitPrice) || unitPrice < 0))) {
+        setError(`Complete the description, quantity, and unit for invoice line ${index + 1}; enter a unit cost if no actual line cost was extracted.`)
         return
       }
       parsedItems.push({
-        source_material_id: item.source_material_id || null,
+        source_material_id: item.isTax ? null : item.source_material_id || null,
         item_number: index + 1,
         description: item.description.trim(),
         quantity,
@@ -861,20 +901,29 @@ export default function ProjectCostsPage() {
                 <div>
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <h3 className="font-semibold text-gray-800">Purchased materials</h3>
-                      <p className="text-xs text-gray-500">Extracted line details are saved as a snapshot; matching to a takeoff item is optional.</p>
+                      <h3 className="font-semibold text-gray-800">Invoice line items</h3>
+                      <p className="text-xs text-gray-500">Review material lines and invoice charges such as sales tax. Matching materials to the takeoff is optional.</p>
                     </div>
-                    <button type="button" onClick={addDraftItem} className="rounded border px-3 py-1.5 text-xs font-semibold text-blue-700">Add line</button>
+                    <div className="flex gap-2">
+                      <button type="button" disabled={draftItems.some(item => item.isTax)} onClick={addSalesTaxLine} className="rounded border px-3 py-1.5 text-xs font-semibold text-blue-700 disabled:opacity-50">
+                        {draftItems.some(item => item.isTax) ? 'Sales tax added' : 'Add sales tax'}
+                      </button>
+                      <button type="button" onClick={addDraftItem} className="rounded border px-3 py-1.5 text-xs font-semibold text-blue-700">Add line</button>
+                    </div>
                   </div>
                   <div className="space-y-3">
                     {draftItems.map((item, index) => {
-                      const lineTotal = Number(item.quantity) * Number(item.unit_price)
+                      const extractedLineCost = item.actual_line_cost?.trim() ? Number(item.actual_line_cost) : null
+                      const calculatedLineTotal = Number(item.quantity) * Number(item.unit_price)
+                      const lineTotal = extractedLineCost != null && Number.isFinite(extractedLineCost)
+                        ? extractedLineCost
+                        : calculatedLineTotal
                       return (
                         <div key={index} className="grid gap-3 rounded-lg border bg-gray-50 p-3 md:grid-cols-12">
                           <label className="text-xs font-medium text-gray-600 md:col-span-3">
                             Match takeoff (optional)
-                            <select value={item.source_material_id} onChange={event => handleMaterialSelect(index, event.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm">
-                              <option value="">No match</option>
+                            <select disabled={item.isTax} value={item.source_material_id} onChange={event => handleMaterialSelect(index, event.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm disabled:bg-gray-100">
+                              <option value="">{item.isTax ? 'Invoice charge' : 'No match'}</option>
                               {materials.map(material => <option key={material.id} value={material.id}>{material.item_number ?? '—'}. {material.description}</option>)}
                             </select>
                           </label>
@@ -892,7 +941,7 @@ export default function ProjectCostsPage() {
                           </label>
                           <label className="text-xs font-medium text-gray-600 md:col-span-1">
                             Unit cost
-                            <input required type="number" min="0" step="0.0001" value={item.unit_price} onChange={event => updateDraftItem(index, 'unit_price', event.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm" />
+                            <input required={!item.actual_line_cost} type="number" min="0" step="0.0001" value={item.unit_price} onChange={event => updateDraftItem(index, 'unit_price', event.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm" />
                           </label>
                           <div className="flex items-end justify-between gap-2 md:col-span-2">
                             <span className="pb-2 text-sm font-semibold">
@@ -979,7 +1028,7 @@ export default function ProjectCostsPage() {
                     <div className="overflow-x-auto">
                       <table className="w-full min-w-[600px] text-left text-sm">
                         <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-                          <tr><th className="p-3">#</th><th className="p-3">Purchased material</th><th className="p-3">Quantity</th><th className="p-3">Unit cost</th><th className="p-3 text-right">Actual line cost</th></tr>
+                          <tr><th className="p-3">#</th><th className="p-3">Item / charge</th><th className="p-3">Quantity</th><th className="p-3">Unit cost</th><th className="p-3 text-right">Actual line cost</th></tr>
                         </thead>
                         <tbody className="divide-y">
                           {(invoice.material_invoice_items || []).map((item, index) => (
