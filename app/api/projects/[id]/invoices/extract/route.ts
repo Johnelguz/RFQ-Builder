@@ -191,19 +191,19 @@ export async function POST(request: Request, { params }: RouteContext) {
       const inferredQuantity = amountValue != null && priceValue != null && priceValue > 0
         ? amountValue / priceValue
         : null
-      const quantityEstimated = quantityValue == null || quantityValue <= 0
+      const quantityEstimated = quantityValue == null || quantityValue < 0
       const quantityInferred = quantityEstimated && inferredQuantity != null
         && Number.isFinite(inferredQuantity) && inferredQuantity > 0
       if (quantityEstimated) {
         if (quantityInferred) linesWithEstimatedQuantity += 1
         else linesWithoutExtractedQuantity += 1
       }
-      const savedQuantity = quantityValue != null && quantityValue > 0
+      const savedQuantity = quantityValue != null && quantityValue >= 0
         ? String(quantityValue)
         : quantityInferred
           ? Number(inferredQuantity.toFixed(4)).toString()
           : ''
-      const inferredPrice = amountValue != null && savedQuantity
+      const inferredPrice = amountValue != null && Number(savedQuantity) > 0
         ? amountValue / Number(savedQuantity)
         : priceValue
       return {

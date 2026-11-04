@@ -32,6 +32,7 @@ interface InvoiceItem {
   quantity: number
   unit: string
   unit_price: number
+  actual_line_cost: number | null
   line_total: number
 }
 
@@ -205,7 +206,7 @@ export default function ProjectCostsPage() {
         supabase.from('projects').select('name, material_budget').eq('id', projectId).single(),
         supabase.from('materials').select('id, item_number, description, quantity, unit').eq('project_id', projectId).order('item_number', { ascending: true }),
         supabase.from('suppliers').select('id, company_name, is_active').order('company_name', { ascending: true }),
-        supabase.from('material_invoices').select('id, supplier_id, vendor_name, invoice_number, invoice_date, invoice_total, notes, file_path, file_name, file_mime_type, status, created_at, void_reason, material_invoice_items(id, source_material_id, item_number, description, quantity, unit, unit_price, line_total)').eq('project_id', projectId).order('invoice_date', { ascending: false })
+        supabase.from('material_invoices').select('id, supplier_id, vendor_name, invoice_number, invoice_date, invoice_total, notes, file_path, file_name, file_mime_type, status, created_at, void_reason, material_invoice_items(id, source_material_id, item_number, description, quantity, unit, unit_price, actual_line_cost, line_total)').eq('project_id', projectId).order('invoice_date', { ascending: false })
       ])
 
       const failures = [
@@ -333,7 +334,7 @@ export default function ProjectCostsPage() {
       const price = Number(item.unit_price)
       const actualLineCost = item.actual_line_cost?.trim() ? Number(item.actual_line_cost) : null
       if (actualLineCost != null && Number.isFinite(actualLineCost) && actualLineCost >= 0) return sum + actualLineCost
-      return sum + (Number.isFinite(quantity) && quantity > 0 && Number.isFinite(price) && price >= 0 ? quantity * price : 0)
+      return sum + (Number.isFinite(quantity) && quantity >= 0 && Number.isFinite(price) && price >= 0 ? quantity * price : 0)
     }, 0),
     [draftItems]
   )
@@ -630,6 +631,7 @@ export default function ProjectCostsPage() {
       quantity: number
       unit: string
       unit_price: number
+      actual_line_cost: number | null
     }> = []
     for (const [index, item] of draftItems.entries()) {
       const quantity = Number(item.quantity)
@@ -639,9 +641,9 @@ export default function ProjectCostsPage() {
       const unitPrice = hasValidActualLineCost && quantity > 0
         ? actualLineCost / quantity
         : enteredUnitPrice
-      if (!item.description.trim() || !Number.isFinite(quantity) || quantity <= 0 || !item.unit.trim()
+      if (!item.description.trim() || !item.quantity.trim() || !Number.isFinite(quantity) || quantity < 0 || !item.unit.trim()
         || (!hasValidActualLineCost && (!item.unit_price.trim() || !Number.isFinite(unitPrice) || unitPrice < 0))) {
-        setError(`Complete the description, quantity, and unit for invoice line ${index + 1}; enter a unit cost if no actual line cost was extracted.`)
+        setError(`Complete the description, quantity (zero is allowed), and unit for invoice line ${index + 1}; enter a unit cost if no actual line cost was extracted.`)
         return
       }
       parsedItems.push({
@@ -650,7 +652,8 @@ export default function ProjectCostsPage() {
         description: item.description.trim(),
         quantity,
         unit: item.unit.trim(),
-        unit_price: unitPrice
+        unit_price: unitPrice,
+        actual_line_cost: hasValidActualLineCost ? actualLineCost : null
       })
     }
 
@@ -933,7 +936,7 @@ export default function ProjectCostsPage() {
                           </label>
                           <label className="text-xs font-medium text-gray-600 md:col-span-1">
                             Qty
-                            <input required type="number" min="0.0001" step="any" value={item.quantity} onChange={event => updateDraftItem(index, 'quantity', event.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm" />
+                            <input required type="number" min="0" step="any" value={item.quantity} onChange={event => updateDraftItem(index, 'quantity', event.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm" />
                           </label>
                           <label className="text-xs font-medium text-gray-600 md:col-span-1">
                             Unit
