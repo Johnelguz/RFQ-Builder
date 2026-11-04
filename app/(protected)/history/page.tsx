@@ -184,9 +184,12 @@ export default function RFQHistoryPage() {
                 <div className="flex flex-col md:flex-row md:items-center justify-between pb-3 mb-3 border-b gap-2">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="bg-blue-50 text-blue-700 text-xs font-bold px-2.5 py-0.5 rounded">
-                        Job: {jobName}
-                      </span>
+                      <Link
+                        href={`/projects/${batch.project_id}`}
+                        className="rounded bg-blue-50 px-2.5 py-1 text-sm font-bold text-blue-700 hover:bg-blue-100"
+                      >
+                        Project: {jobName}
+                      </Link>
                       <span className="text-xs text-gray-400 font-mono">Dispatched: {dispatchDate}</span>
                     </div>
                     <div className="text-base font-bold text-gray-800 mt-1">
