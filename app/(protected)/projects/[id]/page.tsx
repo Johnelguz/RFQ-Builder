@@ -43,6 +43,7 @@ function TakeoffDashboard() {
   
   const [projectName, setProjectName] = useState<string>('')
   const [materials, setMaterials] = useState<Material[]>([])
+  const [materialsProjectId, setMaterialsProjectId] = useState<string | null>(null)
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([])
   
@@ -59,6 +60,7 @@ function TakeoffDashboard() {
   const [showCatalogModal, setShowCatalogModal] = useState<boolean>(false)
   const [showRfqWizard, setShowRfqWizard] = useState<boolean>(false)
   const [wizardStep, setWizardStep] = useState<'PROJECT_NAME' | 'SUPPLIER_LIST'>('PROJECT_NAME')
+  const handledDashboardRfqProjectId = useRef<string | null>(null)
   
   // Standard Material Form state
   const [form, setForm] = useState({
@@ -101,8 +103,10 @@ function TakeoffDashboard() {
   }, [projectId])
 
   const fetchMaterials = useCallback(async () => {
+    setMaterialsProjectId(null)
     const { data } = await supabase.from('materials').select('*').eq('project_id', projectId).order('item_number', { ascending: true })
     if (data) setMaterials(data)
+    setMaterialsProjectId(projectId)
   }, [projectId])
 
   const fetchSuppliers = useCallback(async () => {
@@ -286,14 +290,26 @@ function TakeoffDashboard() {
     fetchCatalog()
   }
 
-  function handleOpenRfqWizard() {
+  const handleOpenRfqWizard = useCallback(() => {
     if (materials.length === 0) {
       alert('Please add at least one material line item before generating an RFQ.')
       return
     }
     setWizardStep('PROJECT_NAME')
     setShowRfqWizard(true)
-  }
+  }, [materials.length])
+
+  useEffect(() => {
+    if (materialsProjectId !== projectId || handledDashboardRfqProjectId.current === projectId) return
+    const url = new URL(window.location.href)
+    if (url.searchParams.get('openRfq') !== '1') return
+
+    handledDashboardRfqProjectId.current = projectId
+    url.searchParams.delete('openRfq')
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
+    const timer = window.setTimeout(() => handleOpenRfqWizard(), 0)
+    return () => window.clearTimeout(timer)
+  }, [handleOpenRfqWizard, materialsProjectId, projectId])
 
   async function handleProceedToSuppliers(e: React.FormEvent) {
     e.preventDefault()

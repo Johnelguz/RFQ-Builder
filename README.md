@@ -29,6 +29,8 @@ After the authentication migration is active, apply [`supabase/migrations/202611
 
 RFQ Managers and Admins can record and delete quotes; all roles can view and compare them. Open a project, then choose **Vendor Quotes**. A recorded quote is independent from later takeoff edits.
 
+RFQ Managers and Admins can also start an RFQ from the dashboard by choosing its project and selecting **Create RFQ**; the project RFQ wizard opens directly without first opening the project card.
+
 ## Material budgets and invoice extraction
 
 After the authentication and quote migrations are active, apply [`supabase/migrations/20261103220200_project_budgets_and_invoices.sql`](./supabase/migrations/20261103220200_project_budgets_and_invoices.sql) in the Supabase SQL Editor. It adds a manually editable project material budget, immutable invoice records and line-item snapshots, voiding with a reason, and a private `project-invoices` Supabase Storage bucket.

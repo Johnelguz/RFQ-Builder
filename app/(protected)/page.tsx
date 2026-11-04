@@ -20,6 +20,7 @@ export default function Home() {
   const canCreateProjects = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
   const [projects, setProjects] = useState<Project[]>([])
   const [projectName, setProjectName] = useState('')
+  const [rfqProjectId, setRfqProjectId] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -64,6 +65,12 @@ export default function Home() {
     router.push(`/projects/${data.id}`)
   }
 
+  function handleStartRfq(event: React.FormEvent) {
+    event.preventDefault()
+    if (!rfqProjectId) return
+    router.push(`/projects/${rfqProjectId}?openRfq=1`)
+  }
+
   return (
     <main className="mx-auto w-full max-w-7xl p-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -72,19 +79,44 @@ export default function Home() {
           <p className="mt-1 text-sm text-gray-600">Shared project takeoffs and RFQ history for your team.</p>
         </div>
         {canCreateProjects && (
-          <form onSubmit={handleCreateProject} className="flex flex-wrap gap-2">
-            <input
-              required
-              value={projectName}
-              onChange={event => setProjectName(event.target.value)}
-              placeholder="New project name"
-              aria-label="New project name"
-              className="rounded border px-3 py-2 text-sm"
-            />
-            <button disabled={saving} className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
-              {saving ? 'Creating…' : 'Create project'}
-            </button>
-          </form>
+          <div className="flex flex-wrap items-end gap-3">
+            <form onSubmit={handleStartRfq} className="flex flex-wrap gap-2">
+              <label className="text-xs font-medium text-gray-600">
+                Start an RFQ for
+                <select
+                  required
+                  value={rfqProjectId}
+                  onChange={event => setRfqProjectId(event.target.value)}
+                  aria-label="Choose a project for the RFQ"
+                  className="mt-1 block rounded border bg-white px-3 py-2 text-sm"
+                >
+                  <option value="">Choose project…</option>
+                  {projects.map(project => (
+                    <option key={project.id} value={project.id}>{project.name}</option>
+                  ))}
+                </select>
+              </label>
+              <button
+                disabled={!rfqProjectId}
+                className="self-end rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                Create RFQ
+              </button>
+            </form>
+            <form onSubmit={handleCreateProject} className="flex flex-wrap gap-2">
+              <input
+                required
+                value={projectName}
+                onChange={event => setProjectName(event.target.value)}
+                placeholder="New project name"
+                aria-label="New project name"
+                className="rounded border px-3 py-2 text-sm"
+              />
+              <button disabled={saving} className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
+                {saving ? 'Creating…' : 'Create project'}
+              </button>
+            </form>
+          </div>
         )}
       </div>
 
