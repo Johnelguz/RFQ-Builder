@@ -319,11 +319,6 @@ export default function ProjectCostsPage() {
     : budget > 0
       ? Math.min(budgetUsagePercent, 100)
       : postedExpenses > 0 ? 100 : 0
-  const budgetBarColor = remainingBudget != null && remainingBudget < 0
-    ? 'bg-red-500'
-    : budgetUsagePercent >= 80
-      ? 'bg-amber-500'
-      : 'bg-blue-600'
   const draftLineTotal = useMemo(
     () => draftItems.reduce((sum, item) => {
       const quantity = Number(item.quantity)
@@ -758,12 +753,12 @@ export default function ProjectCostsPage() {
         <p className="py-12 text-center text-sm text-gray-500">Loading budget and invoices…</p>
       ) : (
         <>
-          <section className="mb-8 grid gap-4 md:grid-cols-3">
-            <div className="rounded-xl border bg-white p-5 shadow-sm">
+          <section className="mb-6 grid gap-3 md:grid-cols-3">
+            <div className="rounded-xl border bg-white p-4 shadow-sm">
               <p className="text-xs font-semibold uppercase text-gray-500">Material budget</p>
               <p className="mt-2 text-2xl font-bold text-gray-800">{budget == null ? 'Not set' : currency(budget)}</p>
               {canEditCosts ? (
-                <form onSubmit={handleSaveBudget} className="mt-4 flex gap-2">
+                <form onSubmit={handleSaveBudget} className="mt-3 flex gap-2">
                   <input
                     type="number"
                     min="0"
@@ -780,12 +775,12 @@ export default function ProjectCostsPage() {
                 </form>
               ) : <p className="mt-2 text-xs text-gray-500">Only Admins and Cost Editors can change the budget.</p>}
             </div>
-            <div className="rounded-xl border bg-white p-5 shadow-sm">
+            <div className="rounded-xl border bg-white p-4 shadow-sm">
               <p className="text-xs font-semibold uppercase text-gray-500">Invoice expenses</p>
               <p className="mt-2 text-2xl font-bold text-gray-800">{currency(postedExpenses)}</p>
               <p className="mt-2 text-xs text-gray-500">Sum of posted invoice totals only; line items are not added separately.</p>
             </div>
-            <div className={`rounded-xl border p-5 shadow-sm ${remainingBudget != null && remainingBudget < 0 ? 'border-red-200 bg-red-50' : 'bg-white'}`}>
+            <div className={`rounded-xl border p-4 shadow-sm ${remainingBudget != null && remainingBudget < 0 ? 'border-red-200 bg-red-50' : 'bg-white'}`}>
               <p className="text-xs font-semibold uppercase text-gray-500">Budget remaining</p>
               <p className={`mt-2 text-2xl font-bold ${remainingBudget != null && remainingBudget < 0 ? 'text-red-700' : 'text-gray-800'}`}>
                 {remainingBudget == null ? 'Set a budget' : currency(remainingBudget)}
@@ -794,7 +789,7 @@ export default function ProjectCostsPage() {
             </div>
           </section>
 
-          <section aria-labelledby="budget-expenses-heading" className="mb-8 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+          <section aria-labelledby="budget-expenses-heading" className="mb-6 max-w-4xl rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 id="budget-expenses-heading" className="text-base font-semibold text-gray-800">Budget vs. expenses</h2>
@@ -802,11 +797,7 @@ export default function ProjectCostsPage() {
               </div>
               {budget != null && budget > 0 && (
                 <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                  remainingBudget != null && remainingBudget < 0
-                    ? 'bg-red-50 text-red-700'
-                    : budgetUsagePercent >= 80
-                      ? 'bg-amber-50 text-amber-700'
-                      : 'bg-blue-50 text-blue-700'
+                  remainingBudget != null && remainingBudget < 0 ? 'bg-red-50 text-red-700' : 'bg-pink-50 text-pink-700'
                 }`}>
                   {budgetUsagePercent.toFixed(1)}% used
                 </span>
@@ -819,7 +810,7 @@ export default function ProjectCostsPage() {
               </p>
             ) : (
               <>
-                <div className="mt-6" role="group" aria-label="Posted expenses as a proportion of the material budget">
+                <div className="mt-4" role="group" aria-label="Posted expenses as a proportion of the material budget">
                   <div
                     role="progressbar"
                     aria-label="Material budget spent"
@@ -831,16 +822,19 @@ export default function ProjectCostsPage() {
                     aria-valuetext={budget === 0
                       ? `${currency(postedExpenses)} expenses against a ${currency(budget)} budget`
                       : `${currency(postedExpenses)} of ${currency(budget)} spent`}
-                    className="h-4 overflow-hidden rounded-full bg-gray-100"
+                    className={`h-3 overflow-hidden rounded-full ${
+                      budget === 0 && postedExpenses === 0 ? 'bg-gray-100' : 'bg-emerald-500'
+                    }`}
                   >
                     <div
-                      className={`h-full rounded-full transition-[width] duration-500 ${budgetBarColor}`}
+                      className="h-full rounded-full bg-pink-500 transition-[width] duration-500"
                       style={{ width: `${budgetBarWidth}%` }}
                     />
                   </div>
                 </div>
-                <div className="mt-3 flex flex-wrap items-start justify-between gap-x-6 gap-y-2 text-sm">
-                  <div>
+                <div className="mt-3 flex flex-wrap items-start justify-between gap-x-5 gap-y-2 text-sm">
+                  <div className="flex items-center">
+                    <span aria-hidden="true" className="mr-2 h-2.5 w-2.5 rounded-full bg-pink-500" />
                     <span className="text-gray-500">Expenses</span>
                     <span className="ml-2 font-semibold text-gray-800">{currency(postedExpenses)}</span>
                   </div>
@@ -848,7 +842,10 @@ export default function ProjectCostsPage() {
                     <span className="text-gray-500">Budget</span>
                     <span className="ml-2 font-semibold text-gray-800">{currency(budget)}</span>
                   </div>
-                  <div className="sm:text-right">
+                  <div className="flex items-center sm:text-right">
+                    {remainingBudget != null && remainingBudget >= 0 && (
+                      <span aria-hidden="true" className="mr-2 h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                    )}
                     <span className="text-gray-500">{remainingBudget != null && remainingBudget < 0 ? 'Over budget' : 'Remaining'}</span>
                     <span className={`ml-2 font-semibold ${remainingBudget != null && remainingBudget < 0 ? 'text-red-700' : 'text-gray-800'}`}>
                       {currency(Math.abs(remainingBudget ?? 0))}
