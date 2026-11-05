@@ -693,14 +693,24 @@ export default function ProjectCostsPage() {
     setOpeningInvoiceId(invoice.id)
     setError(null)
     try {
-      const { data, error: signedUrlError } = await supabase.storage
-        .from(INVOICE_BUCKET)
-        .createSignedUrl(invoice.file_path, 300)
-      if (signedUrlError || !data?.signedUrl) {
-        setError(`Unable to preview invoice file: ${signedUrlError?.message || 'Supabase did not return a signed link.'}`)
+      const accessToken = await getAccessToken()
+      const response = await fetch(`/api/projects/${projectId}/invoices/preview`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ invoiceId: invoice.id })
+      })
+      const responseData: unknown = await response.json()
+      if (!response.ok || !isRecord(responseData) || typeof responseData.signedUrl !== 'string') {
+        const message = isRecord(responseData) && typeof responseData.error === 'string'
+          ? responseData.error
+          : 'Unable to create an invoice preview link.'
+        setError(`Unable to preview invoice file: ${message}`)
         return
       }
-      setInvoicePreview({ invoice, url: data.signedUrl })
+      setInvoicePreview({ invoice, url: responseData.signedUrl })
     } catch (openError) {
       setError(`Unable to preview invoice file: ${openError instanceof Error ? openError.message : 'Unexpected network error.'}`)
     } finally {

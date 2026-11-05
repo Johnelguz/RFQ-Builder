@@ -23,9 +23,9 @@ interface InvoiceApiDatabase {
         Relationships: []
       }
       material_invoices: {
-        Row: { id: string; file_path: string }
-        Insert: { id?: string; file_path: string }
-        Update: { id?: string; file_path?: string }
+        Row: { id: string; project_id: string; file_path: string }
+        Insert: { id?: string; project_id: string; file_path: string }
+        Update: { id?: string; project_id?: string; file_path?: string }
         Relationships: []
       }
     }
@@ -40,7 +40,11 @@ type InvoiceApiContextResult =
   | { context: InvoiceApiContext; error: null; status: 200 }
   | { context: null; error: string; status: 400 | 401 | 403 | 404 | 500 }
 
-export async function getInvoiceApiContext(request: Request, projectId: string): Promise<InvoiceApiContextResult> {
+export async function getInvoiceApiContext(
+  request: Request,
+  projectId: string,
+  allowedRoles: string[] = ['ADMIN', 'COST_EDITOR']
+): Promise<InvoiceApiContextResult> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(projectId)) {
     return { context: null, error: 'Invalid project ID.', status: 400 }
   }
@@ -65,7 +69,7 @@ export async function getInvoiceApiContext(request: Request, projectId: string):
     auth: { autoRefreshToken: false, persistSession: false }
   })
   const [{ data: memberships, error: membershipError }, { data: project, error: projectError }] = await Promise.all([
-    adminClient.from('app_members').select('role').eq('user_id', user.id).in('role', ['ADMIN', 'COST_EDITOR']),
+    adminClient.from('app_members').select('role').eq('user_id', user.id).in('role', allowedRoles),
     adminClient.from('projects').select('id').eq('id', projectId).maybeSingle()
   ])
 
@@ -73,7 +77,7 @@ export async function getInvoiceApiContext(request: Request, projectId: string):
     return { context: null, error: 'Unable to verify invoice access.', status: 500 }
   }
   if (!memberships?.length) {
-    return { context: null, error: 'Only administrators and cost editors may upload or extract invoices.', status: 403 }
+    return { context: null, error: 'You do not have permission to access invoice files.', status: 403 }
   }
   if (!project) return { context: null, error: 'Project not found.', status: 404 }
 
