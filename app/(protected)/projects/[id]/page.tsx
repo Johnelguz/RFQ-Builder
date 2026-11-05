@@ -42,6 +42,30 @@ interface SavedRfqWorkflow {
   dispatchedSupplierIds: string[]
 }
 
+interface SavedTakeoffDraft {
+  version: 1
+  activeTab: 'STANDARD' | 'WIRE_APP'
+  form: {
+    quantity: number | null
+    unit: string
+    description: string
+    manufacturer: string
+    model_number: string
+    sheet_reference: string
+    notes: string
+  }
+  wireForm: {
+    pullId: string
+    wireSize: string
+    wireType: string
+    wireMaterial: string
+    wireLength: string
+    wireColors: string
+    greenWireSize: string
+  }
+  preparations: string[]
+}
+
 function isSavedRfqWorkflow(value: unknown): value is SavedRfqWorkflow {
   return typeof value === 'object'
     && value !== null
@@ -55,6 +79,26 @@ function isSavedRfqWorkflow(value: unknown): value is SavedRfqWorkflow {
     && 'dispatchedSupplierIds' in value
     && Array.isArray(value.dispatchedSupplierIds)
     && value.dispatchedSupplierIds.every(id => typeof id === 'string')
+}
+
+function isSavedTakeoffDraft(value: unknown): value is SavedTakeoffDraft {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const draft = value as Record<string, unknown>
+  if (draft.version !== 1 || (draft.activeTab !== 'STANDARD' && draft.activeTab !== 'WIRE_APP')) return false
+  const form = draft.form
+  const wireForm = draft.wireForm
+  if (typeof form !== 'object' || form === null || Array.isArray(form)
+    || typeof wireForm !== 'object' || wireForm === null || Array.isArray(wireForm)) return false
+  const materialForm = form as Record<string, unknown>
+  const wireEntryForm = wireForm as Record<string, unknown>
+  return (materialForm.quantity === null
+      || (typeof materialForm.quantity === 'number' && Number.isFinite(materialForm.quantity)))
+    && ['unit', 'description', 'manufacturer', 'model_number', 'sheet_reference', 'notes']
+      .every(key => typeof materialForm[key] === 'string')
+    && ['pullId', 'wireSize', 'wireType', 'wireMaterial', 'wireLength', 'wireColors', 'greenWireSize']
+      .every(key => typeof wireEntryForm[key] === 'string')
+    && Array.isArray(draft.preparations)
+    && draft.preparations.every(preparation => typeof preparation === 'string')
 }
 
 function TakeoffDashboard() {
@@ -89,6 +133,8 @@ function TakeoffDashboard() {
   const handledDashboardRfqProjectId = useRef<string | null>(null)
   const [restoredRfqWorkflowProjectId, setRestoredRfqWorkflowProjectId] = useState<string | null>(null)
   const rfqWorkflowStorageKey = `rfq-workflow:v1:${user?.id || 'anonymous'}:${projectId}`
+  const takeoffDraftStorageKey = `takeoff-draft:v1:${user?.id || 'anonymous'}:${projectId}`
+  const [restoredTakeoffDraftKey, setRestoredTakeoffDraftKey] = useState<string | null>(null)
   
   // Standard Material Form state
   const [form, setForm] = useState({
@@ -208,6 +254,53 @@ function TakeoffDashboard() {
     showRfqWizard,
     wizardStep
   ])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = window.localStorage.getItem(takeoffDraftStorageKey)
+        if (saved) {
+          const draft: unknown = JSON.parse(saved)
+          if (!isSavedTakeoffDraft(draft)) {
+            window.localStorage.removeItem(takeoffDraftStorageKey)
+            alert('The saved takeoff draft was invalid and has been cleared.')
+          } else {
+            setActiveTab(draft.activeTab)
+            setForm({
+              ...draft.form,
+              quantity: draft.form.quantity == null ? Number.NaN : draft.form.quantity
+            })
+            setWireForm(draft.wireForm)
+            setPreparations(draft.preparations)
+          }
+        }
+      } catch (restoreError) {
+        alert(`Unable to restore the takeoff draft: ${restoreError instanceof Error ? restoreError.message : 'Browser storage is unavailable.'}`)
+      } finally {
+        setRestoredTakeoffDraftKey(takeoffDraftStorageKey)
+      }
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [takeoffDraftStorageKey])
+
+  useEffect(() => {
+    if (restoredTakeoffDraftKey !== takeoffDraftStorageKey) return
+    try {
+      const draft: SavedTakeoffDraft = {
+        version: 1,
+        activeTab,
+        form: {
+          ...form,
+          quantity: Number.isFinite(form.quantity) ? form.quantity : null
+        },
+        wireForm,
+        preparations
+      }
+      window.localStorage.setItem(takeoffDraftStorageKey, JSON.stringify(draft))
+    } catch (saveError) {
+      alert(`Unable to preserve the takeoff draft: ${saveError instanceof Error ? saveError.message : 'Browser storage is unavailable.'}`)
+    }
+  }, [activeTab, form, preparations, restoredTakeoffDraftKey, takeoffDraftStorageKey, wireForm])
 
   const filteredCatalog = catalogItems.filter(item => {
     const query = form.description.toLowerCase()

@@ -159,10 +159,9 @@ export default function ProjectCostsPage() {
     () => user?.id && projectId ? `invoice-draft:v1:${user.id}:${projectId}` : null,
     [projectId, user?.id]
   )
-  const collapsedInvoicesStorageKey = useMemo(
-    () => user?.id && projectId ? `collapsed-invoices:v1:${user.id}:${projectId}` : null,
-    [projectId, user?.id]
-  )
+  const collapsedInvoicesStorageKey = user?.id && projectId
+    ? `collapsed-invoices:v1:${user.id}:${projectId}`
+    : null
   const [projectName, setProjectName] = useState('')
   const [budgetValue, setBudgetValue] = useState('')
   const [budget, setBudget] = useState<number | null>(null)
@@ -264,7 +263,8 @@ export default function ProjectCostsPage() {
     try {
       window.localStorage.setItem(collapsedInvoicesStorageKey, JSON.stringify([...collapsedInvoiceIds]))
     } catch (saveError) {
-      setError(`Unable to save invoice display preferences: ${saveError instanceof Error ? saveError.message : 'Browser storage is unavailable.'}`)
+      const message = `Unable to save invoice display preferences: ${saveError instanceof Error ? saveError.message : 'Browser storage is unavailable.'}`
+      window.setTimeout(() => setError(message), 0)
     }
   }, [collapsedInvoicesStorageKey, collapsedInvoiceIds, restoredCollapsedInvoicesKey])
 
