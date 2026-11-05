@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, Suspense } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -283,9 +283,9 @@ function TakeoffDashboard() {
     return () => window.clearTimeout(timer)
   }, [takeoffDraftStorageKey])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (restoredTakeoffDraftKey !== takeoffDraftStorageKey) return
-    try {
+    function saveTakeoffDraft() {
       const draft: SavedTakeoffDraft = {
         version: 1,
         activeTab,
@@ -296,10 +296,16 @@ function TakeoffDashboard() {
         wireForm,
         preparations
       }
-      window.localStorage.setItem(takeoffDraftStorageKey, JSON.stringify(draft))
-    } catch (saveError) {
-      alert(`Unable to preserve the takeoff draft: ${saveError instanceof Error ? saveError.message : 'Browser storage is unavailable.'}`)
+      try {
+        window.localStorage.setItem(takeoffDraftStorageKey, JSON.stringify(draft))
+      } catch (saveError) {
+        alert(`Unable to preserve the takeoff draft: ${saveError instanceof Error ? saveError.message : 'Browser storage is unavailable.'}`)
+      }
     }
+
+    saveTakeoffDraft()
+    window.addEventListener('pagehide', saveTakeoffDraft)
+    return () => window.removeEventListener('pagehide', saveTakeoffDraft)
   }, [activeTab, form, preparations, restoredTakeoffDraftKey, takeoffDraftStorageKey, wireForm])
 
   const filteredCatalog = catalogItems.filter(item => {
