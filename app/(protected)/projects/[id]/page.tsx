@@ -135,6 +135,7 @@ function TakeoffDashboard() {
   const rfqWorkflowStorageKey = `rfq-workflow:v1:${user?.id || 'anonymous'}:${projectId}`
   const takeoffDraftStorageKey = `takeoff-draft:v1:${user?.id || 'anonymous'}:${projectId}`
   const [restoredTakeoffDraftKey, setRestoredTakeoffDraftKey] = useState<string | null>(null)
+  const takeoffDraftStorageErrorShown = useRef(false)
   
   // Standard Material Form state
   const [form, setForm] = useState({
@@ -283,30 +284,60 @@ function TakeoffDashboard() {
     return () => window.clearTimeout(timer)
   }, [takeoffDraftStorageKey])
 
-  useLayoutEffect(() => {
+  const persistTakeoffDraft = useCallback((
+    updates: Partial<Pick<SavedTakeoffDraft, 'activeTab' | 'form' | 'wireForm' | 'preparations'>> = {}
+  ) => {
     if (restoredTakeoffDraftKey !== takeoffDraftStorageKey) return
-    function saveTakeoffDraft() {
-      const draft: SavedTakeoffDraft = {
-        version: 1,
-        activeTab,
-        form: {
-          ...form,
-          quantity: Number.isFinite(form.quantity) ? form.quantity : null
-        },
-        wireForm,
-        preparations
-      }
-      try {
-        window.localStorage.setItem(takeoffDraftStorageKey, JSON.stringify(draft))
-      } catch (saveError) {
+    const formToSave = updates.form || form
+    const draft: SavedTakeoffDraft = {
+      version: 1,
+      activeTab: updates.activeTab || activeTab,
+      form: {
+        ...formToSave,
+        quantity: Number.isFinite(formToSave.quantity) ? formToSave.quantity : null
+      },
+      wireForm: updates.wireForm || wireForm,
+      preparations: updates.preparations || preparations
+    }
+    try {
+      window.localStorage.setItem(takeoffDraftStorageKey, JSON.stringify(draft))
+    } catch (saveError) {
+      if (!takeoffDraftStorageErrorShown.current) {
+        takeoffDraftStorageErrorShown.current = true
         alert(`Unable to preserve the takeoff draft: ${saveError instanceof Error ? saveError.message : 'Browser storage is unavailable.'}`)
       }
     }
+  }, [
+    activeTab,
+    form,
+    preparations,
+    restoredTakeoffDraftKey,
+    takeoffDraftStorageKey,
+    wireForm
+  ])
 
-    saveTakeoffDraft()
-    window.addEventListener('pagehide', saveTakeoffDraft)
-    return () => window.removeEventListener('pagehide', saveTakeoffDraft)
-  }, [activeTab, form, preparations, restoredTakeoffDraftKey, takeoffDraftStorageKey, wireForm])
+  useLayoutEffect(() => {
+    if (restoredTakeoffDraftKey !== takeoffDraftStorageKey) return
+    persistTakeoffDraft()
+    const saveOnPageHide = () => persistTakeoffDraft()
+    window.addEventListener('pagehide', saveOnPageHide)
+    return () => window.removeEventListener('pagehide', saveOnPageHide)
+  }, [persistTakeoffDraft, restoredTakeoffDraftKey, takeoffDraftStorageKey])
+
+  function updateMaterialForm(nextForm: typeof form) {
+    setForm(nextForm)
+    persistTakeoffDraft({ form: nextForm })
+  }
+
+  function updateWireForm(nextWireForm: typeof wireForm) {
+    setWireForm(nextWireForm)
+    persistTakeoffDraft({ wireForm: nextWireForm })
+  }
+
+  function updateActiveTab(nextTab: 'STANDARD' | 'WIRE_APP') {
+    setActiveTab(nextTab)
+    persistTakeoffDraft({ activeTab: nextTab })
+  }
 
   const filteredCatalog = catalogItems.filter(item => {
     const query = form.description.toLowerCase()
@@ -318,13 +349,14 @@ function TakeoffDashboard() {
   })
 
   function handleSelectAutocomplete(item: CatalogItem) {
-    setForm(prev => ({
-      ...prev,
+    const nextForm = {
+      ...form,
       description: item.description || '',
       manufacturer: item.manufacturer || '',
       model_number: item.model_number || '',
-      unit: item.default_unit || prev.unit
-    }))
+      unit: item.default_unit || form.unit
+    }
+    updateMaterialForm(nextForm)
     setShowCatalogDropdown(false)
   }
 
@@ -368,7 +400,7 @@ function TakeoffDashboard() {
       notes: form.notes
     }])
 
-    setForm({ quantity: 1, unit: 'EA', description: '', manufacturer: '', model_number: '', sheet_reference: '', notes: '' })
+    updateMaterialForm({ quantity: 1, unit: 'EA', description: '', manufacturer: '', model_number: '', sheet_reference: '', notes: '' })
     setShowCatalogDropdown(false)
     fetchMaterials()
   }
@@ -424,7 +456,7 @@ function TakeoffDashboard() {
     setCatalogToast(`⚡ Added Wire Pull "${wireForm.pullId}" (${length} FT) to Takeoff`)
     setTimeout(() => setCatalogToast(null), 4000)
 
-    setWireForm({
+    const emptyWireForm = {
       pullId: '',
       wireSize: '',
       wireType: '',
@@ -432,15 +464,19 @@ function TakeoffDashboard() {
       wireLength: '',
       wireColors: '',
       greenWireSize: ''
-    })
+    }
+    updateWireForm(emptyWireForm)
     setPreparations([])
+    persistTakeoffDraft({ wireForm: emptyWireForm, preparations: [] })
     fetchMaterials()
   }
 
   function handlePrepCheckboxChange(val: string) {
-    setPreparations(prev => 
-      prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val]
-    )
+    const nextPreparations = preparations.includes(val)
+      ? preparations.filter(preparation => preparation !== val)
+      : [...preparations, val]
+    setPreparations(nextPreparations)
+    persistTakeoffDraft({ preparations: nextPreparations })
   }
 
   async function handleUpdateQuantity(materialId: string, newQty: number) {
@@ -686,13 +722,13 @@ function TakeoffDashboard() {
       {/* Tab Switcher */}
       <div className="mb-6 flex border-b">
         <button
-          onClick={() => setActiveTab('STANDARD')}
+          onClick={() => updateActiveTab('STANDARD')}
           className={`px-4 py-2 text-xs font-bold uppercase border-b-2 transition-colors ${activeTab === 'STANDARD' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
         >
           📦 Standard Material Entry
         </button>
         <button
-          onClick={() => setActiveTab('WIRE_APP')}
+          onClick={() => updateActiveTab('WIRE_APP')}
           className={`px-4 py-2 text-xs font-bold uppercase border-b-2 transition-colors ${activeTab === 'WIRE_APP' ? 'border-amber-600 text-amber-700 bg-amber-50/50' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
         >
           ⚡ Wire Order App Integration
@@ -711,7 +747,7 @@ function TakeoffDashboard() {
                 placeholder="e.g. Enclosure / conduit" 
                 value={form.description} 
                 onFocus={() => setShowCatalogDropdown(true)}
-                onChange={e => { setForm({...form, description: e.target.value}); setShowCatalogDropdown(true) }} 
+                onChange={e => { updateMaterialForm({...form, description: e.target.value}); setShowCatalogDropdown(true) }} 
                 className="w-full p-2 border rounded text-sm bg-white" 
               />
               {showCatalogDropdown && form.description.trim().length > 0 && filteredCatalog.length > 0 && (
@@ -727,31 +763,31 @@ function TakeoffDashboard() {
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">Manufacturer</label>
-              <input type="text" placeholder="e.g. Hoffman" value={form.manufacturer} onChange={e => setForm({...form, manufacturer: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
+              <input type="text" placeholder="e.g. Hoffman" value={form.manufacturer} onChange={e => updateMaterialForm({...form, manufacturer: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">Model / Part #</label>
-              <input type="text" placeholder="e.g. JIC-12106" value={form.model_number} onChange={e => setForm({...form, model_number: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
+              <input type="text" placeholder="e.g. JIC-12106" value={form.model_number} onChange={e => updateMaterialForm({...form, model_number: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">Qty</label>
-                <input type="number" step="any" required value={form.quantity} onChange={e => setForm({...form, quantity: parseFloat(e.target.value)})} className="w-full p-2 border rounded text-sm bg-white" />
+                <input type="number" step="any" required value={Number.isNaN(form.quantity) ? '' : form.quantity} onChange={e => updateMaterialForm({...form, quantity: parseFloat(e.target.value)})} className="w-full p-2 border rounded text-sm bg-white" />
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">Unit</label>
-                <select value={form.unit} onChange={e => setForm({...form, unit: e.target.value})} className="w-full p-2 border rounded text-sm bg-white">
+                <select value={form.unit} onChange={e => updateMaterialForm({...form, unit: e.target.value})} className="w-full p-2 border rounded text-sm bg-white">
                   <option value="EA">EA</option><option value="FT">FT</option><option value="SET">SET</option><option value="LOT">LOT</option><option value="BOX">BOX</option>
                 </select>
               </div>
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">Sheet Reference</label>
-              <input type="text" placeholder="e.g. E-501" value={form.sheet_reference} onChange={e => setForm({...form, sheet_reference: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
+              <input type="text" placeholder="e.g. E-501" value={form.sheet_reference} onChange={e => updateMaterialForm({...form, sheet_reference: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
             </div>
             <div className="md:col-span-2">
               <label className="block text-xs font-semibold text-gray-600 mb-1">Notes</label>
-              <input type="text" placeholder="Additional requirements" value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
+              <input type="text" placeholder="Additional requirements" value={form.notes} onChange={e => updateMaterialForm({...form, notes: e.target.value})} className="w-full p-2 border rounded text-sm bg-white" />
             </div>
             <div className="md:col-span-2 flex items-end">
               <button type="submit" className="w-full bg-blue-600 text-white p-2.5 rounded text-sm font-medium hover:bg-blue-700">Add Line Item</button>
@@ -772,7 +808,7 @@ function TakeoffDashboard() {
                   required 
                   placeholder="e.g., panel 1" 
                   value={wireForm.pullId} 
-                  onChange={e => setWireForm({...wireForm, pullId: e.target.value})} 
+                  onChange={e => updateWireForm({...wireForm, pullId: e.target.value})} 
                   className="w-full p-2 border rounded text-sm bg-white" 
                 />
               </div>
@@ -782,7 +818,7 @@ function TakeoffDashboard() {
                 <select 
                   required 
                   value={wireForm.wireSize} 
-                  onChange={e => setWireForm({...wireForm, wireSize: e.target.value})} 
+                  onChange={e => updateWireForm({...wireForm, wireSize: e.target.value})} 
                   className="w-full p-2 border rounded text-sm bg-white"
                 >
                   <option value="">Select Wire Size</option>
@@ -808,7 +844,7 @@ function TakeoffDashboard() {
                 <select 
                   required 
                   value={wireForm.wireType} 
-                  onChange={e => setWireForm({...wireForm, wireType: e.target.value})} 
+                  onChange={e => updateWireForm({...wireForm, wireType: e.target.value})} 
                   className="w-full p-2 border rounded text-sm bg-white"
                 >
                   <option value="">Select Wire Type</option>
@@ -822,7 +858,7 @@ function TakeoffDashboard() {
                 <select 
                   required 
                   value={wireForm.wireMaterial} 
-                  onChange={e => setWireForm({...wireForm, wireMaterial: e.target.value})} 
+                  onChange={e => updateWireForm({...wireForm, wireMaterial: e.target.value})} 
                   className="w-full p-2 border rounded text-sm bg-white"
                 >
                   <option value="">Select Conductor Material</option>
@@ -838,7 +874,7 @@ function TakeoffDashboard() {
                   required 
                   placeholder="e.g., 150" 
                   value={wireForm.wireLength} 
-                  onChange={e => setWireForm({...wireForm, wireLength: e.target.value})} 
+                  onChange={e => updateWireForm({...wireForm, wireLength: e.target.value})} 
                   className="w-full p-2 border rounded text-sm bg-white" 
                 />
               </div>
@@ -848,7 +884,7 @@ function TakeoffDashboard() {
                 <select 
                   required 
                   value={wireForm.wireColors} 
-                  onChange={e => setWireForm({...wireForm, wireColors: e.target.value})} 
+                  onChange={e => updateWireForm({...wireForm, wireColors: e.target.value})} 
                   className="w-full p-2 border rounded text-sm bg-white"
                 >
                   <option value="">Select Color Configuration</option>
@@ -869,7 +905,7 @@ function TakeoffDashboard() {
                 <label className="block text-xs font-semibold text-emerald-900 mb-1">Green Wire Size (Optional Override)</label>
                 <select 
                   value={wireForm.greenWireSize} 
-                  onChange={e => setWireForm({...wireForm, greenWireSize: e.target.value})} 
+                  onChange={e => updateWireForm({...wireForm, greenWireSize: e.target.value})} 
                   className="w-full p-2 border rounded text-sm bg-white font-bold text-emerald-700"
                 >
                   <option value="">Use Same as Main Wire Size</option>

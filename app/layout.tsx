@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "M Phase RFQ Builder",
-  description: "Shared project, RFQ, and material cost tracking",
+  description: "Project Material Tracking and RFQ Generator",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
