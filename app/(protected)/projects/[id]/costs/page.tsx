@@ -1054,36 +1054,48 @@ export default function ProjectCostsPage() {
               <p className="rounded-lg border bg-white p-6 text-sm text-gray-500">No material invoices have been recorded for this project.</p>
             ) : (
               <div className="space-y-4">
-                {invoices.map(invoice => (
+                {invoices.map(invoice => {
+                  const isCollapsed = collapsedInvoiceIds.has(invoice.id)
+                  return (
                   <article key={invoice.id} className={`overflow-hidden rounded-xl border bg-white shadow-sm ${invoice.status === 'VOID' ? 'opacity-75' : ''}`}>
-                    <header className="flex flex-wrap items-start justify-between gap-4 p-5">
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-800">
+                    <header className={isCollapsed
+                      ? 'grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,2fr)_auto_auto] items-center gap-3 p-3'
+                      : 'flex flex-wrap items-start justify-between gap-4 p-5'}>
+                      <div className={isCollapsed ? 'contents' : ''}>
+                        <h3 className={isCollapsed ? 'truncate text-sm font-bold text-gray-800' : 'text-lg font-bold text-gray-800'}>
                           {invoice.supplier_id && supplierById.has(invoice.supplier_id)
                             ? supplierById.get(invoice.supplier_id)
                             : invoice.vendor_name}
                         </h3>
-                        <p className="mt-1 text-sm text-gray-500">
+                        <p className={isCollapsed ? 'truncate text-xs text-gray-500' : 'mt-1 text-sm text-gray-500'}>
                           {invoice.invoice_number ? `Invoice ${invoice.invoice_number} · ` : ''}{invoice.invoice_date}
                         </p>
-                        {invoice.notes && <p className="mt-2 whitespace-pre-wrap text-sm text-gray-600">{invoice.notes}</p>}
+                        {isCollapsed
+                          ? <p className="truncate text-xs text-gray-600" title={invoice.notes || 'No notes'}>{invoice.notes || 'No notes'}</p>
+                          : invoice.notes && <p className="mt-2 whitespace-pre-wrap text-sm text-gray-600">{invoice.notes}</p>}
                       </div>
-                      <div className="flex items-center gap-4">
+                      <div className={isCollapsed ? 'contents' : 'flex items-center gap-4'}>
                         <div className="text-right">
-                          <p className="text-xs uppercase text-gray-500">{invoice.status === 'POSTED' ? 'Expense total' : 'Voided total'}</p>
-                          <p className={`text-xl font-bold ${invoice.status === 'POSTED' ? 'text-gray-800' : 'text-gray-500 line-through'}`}>{currency(Number(invoice.invoice_total))}</p>
+                          {isCollapsed
+                            ? <p className={`whitespace-nowrap text-sm font-bold ${invoice.status === 'POSTED' ? 'text-gray-800' : 'text-gray-500 line-through'}`}>
+                                {invoice.status === 'POSTED' ? 'Total' : 'Voided'} {currency(Number(invoice.invoice_total))}
+                              </p>
+                            : <>
+                                <p className="text-xs uppercase text-gray-500">{invoice.status === 'POSTED' ? 'Expense total' : 'Voided total'}</p>
+                                <p className={`text-xl font-bold ${invoice.status === 'POSTED' ? 'text-gray-800' : 'text-gray-500 line-through'}`}>{currency(Number(invoice.invoice_total))}</p>
+                              </>}
                         </div>
                         <button
                           type="button"
-                          aria-expanded={!collapsedInvoiceIds.has(invoice.id)}
+                          aria-expanded={!isCollapsed}
                           onClick={() => toggleInvoiceCollapsed(invoice.id)}
                           className="rounded border px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50"
                         >
-                          {collapsedInvoiceIds.has(invoice.id) ? 'Expand' : 'Collapse'}
+                          {isCollapsed ? 'Expand' : 'Collapse'}
                         </button>
                       </div>
                     </header>
-                    {!collapsedInvoiceIds.has(invoice.id) && (
+                    {!isCollapsed && (
                       <>
                         <div className="flex flex-wrap items-start justify-between gap-4 border-t p-5">
                           <div>
@@ -1125,7 +1137,8 @@ export default function ProjectCostsPage() {
                       </>
                     )}
                   </article>
-                ))}
+                  )
+                })}
               </div>
             )}
           </section>
