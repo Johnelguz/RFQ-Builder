@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { hasAnyRole, useAuth } from '@/lib/auth-context'
 
@@ -36,24 +36,39 @@ interface RFQHistoryItem {
 
 export default function RFQHistoryPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const projectId = searchParams.get('projectId')
   const { roles } = useAuth()
   const canManageRfqs = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
   const [history, setHistory] = useState<RFQHistoryItem[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState<boolean>(true)
+  const [expandedBatchIds, setExpandedBatchIds] = useState<Set<string>>(() => new Set())
   const normalizedSearchQuery = searchQuery.trim().toLowerCase()
   const filteredHistory = normalizedSearchQuery
     ? history.filter(batch => {
         const projectName = batch.projects?.name || ''
+        const supplierName = batch.suppliers?.company_name || ''
+        const supplierContact = batch.suppliers?.contact_name || ''
+        const supplierEmail = batch.suppliers?.email || ''
+        const dispatchDate = new Date(batch.created_at).toLocaleString()
         const hasMatchingDescription = batch.rfq_line_items?.some(lineItem =>
-          lineItem.materials?.description.toLowerCase().includes(normalizedSearchQuery)
+          [lineItem.materials?.description, lineItem.materials?.manufacturer, lineItem.materials?.model_number]
+            .some(value => value?.toLowerCase().includes(normalizedSearchQuery))
         )
-        return projectName.toLowerCase().includes(normalizedSearchQuery) || hasMatchingDescription
+        return projectName.toLowerCase().includes(normalizedSearchQuery)
+          || supplierName.toLowerCase().includes(normalizedSearchQuery)
+          || supplierContact.toLowerCase().includes(normalizedSearchQuery)
+          || supplierEmail.toLowerCase().includes(normalizedSearchQuery)
+          || dispatchDate.toLowerCase().includes(normalizedSearchQuery)
+          || batch.subject.toLowerCase().includes(normalizedSearchQuery)
+          || hasMatchingDescription
       })
     : history
 
-  async function fetchRFQHistory() {
-    const { data, error } = await supabase
+  const fetchRFQHistory = useCallback(async () => {
+    setLoading(true)
+    let query = supabase
       .from('rfq_batches')
       .select(`
         id,
@@ -76,7 +91,8 @@ export default function RFQHistoryPage() {
           )
         )
       `)
-      .order('created_at', { ascending: false })
+    if (projectId) query = query.eq('project_id', projectId)
+    const { data, error } = await query.order('created_at', { ascending: false })
 
     if (error) {
       alert('Error fetching RFQ history: ' + error.message)
@@ -84,12 +100,21 @@ export default function RFQHistoryPage() {
       setHistory(data as unknown as RFQHistoryItem[])
     }
     setLoading(false)
-  }
+  }, [projectId])
 
   useEffect(() => {
     const timer = window.setTimeout(() => void fetchRFQHistory(), 0)
     return () => window.clearTimeout(timer)
-  }, [])
+  }, [fetchRFQHistory])
+
+  function toggleBatchExpanded(batchId: string) {
+    setExpandedBatchIds(current => {
+      const next = new Set(current)
+      if (next.has(batchId)) next.delete(batchId)
+      else next.add(batchId)
+      return next
+    })
+  }
 
   async function handleReloadBatchIntoProject(batch: RFQHistoryItem) {
     if (!batch.project_id) {
@@ -161,11 +186,22 @@ export default function RFQHistoryPage() {
     <div className="max-w-6xl mx-auto p-6 font-sans">
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Sent RFQ History & Records</h1>
-          <p className="text-xs text-gray-500 mt-1">Review dispatched material packages, reload past orders for resending, and clear records as jobs close.</p>
+          <h1 className="text-2xl font-bold text-gray-800">
+            {projectId ? 'Project RFQ History' : 'All Sent RFQ History'}
+          </h1>
+          <p className="text-xs text-gray-500 mt-1">
+            {projectId
+              ? 'Review RFQs dispatched for this project.'
+              : 'Search and review dispatched material packages across all projects.'}
+          </p>
         </div>
         <div className="flex items-center gap-3">
-          {canManageRfqs && history.length > 0 && (
+          {projectId && (
+            <Link href="/history" className="text-xs font-semibold text-blue-700 hover:underline">
+              View all RFQ history
+            </Link>
+          )}
+          {!projectId && canManageRfqs && history.length > 0 && (
             <button
               onClick={handleClearAllHistory}
               className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-3 py-2 rounded-lg text-xs font-semibold transition-colors"
@@ -190,7 +226,7 @@ export default function RFQHistoryPage() {
               type="search"
               value={searchQuery}
               onChange={event => setSearchQuery(event.target.value)}
-              placeholder="Job name or product description"
+              placeholder="Supplier, project, date, or product"
               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
@@ -212,43 +248,60 @@ export default function RFQHistoryPage() {
             const companyName = batch.suppliers?.company_name || 'Unknown Supplier'
             const contactName = batch.suppliers?.contact_name || 'General Team'
             const email = batch.suppliers?.email || ''
+            const isExpanded = expandedBatchIds.has(batch.id)
 
             return (
-              <div key={batch.id} className="bg-white border rounded-lg p-5 shadow-xs">
-                <div className="flex flex-col md:flex-row md:items-center justify-between pb-3 mb-3 border-b gap-2">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <Link
-                        href={`/projects/${batch.project_id}`}
-                        className="rounded bg-blue-50 px-2.5 py-1 text-sm font-bold text-blue-700 hover:bg-blue-100"
-                      >
-                        Project: {jobName}
-                      </Link>
-                      <span className="text-xs text-gray-400 font-mono">Dispatched: {dispatchDate}</span>
-                    </div>
-                    <div className="text-base font-bold text-gray-800 mt-1">
-                      {companyName} <span className="text-sm font-normal text-gray-600">({contactName} — <a href={`mailto:${email}`} className="text-blue-600 hover:underline">{email}</a>)</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {canManageRfqs && <button
-                      onClick={() => handleReloadBatchIntoProject(batch)}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors shadow-xs"
-                      title="Load these items back into the active takeoff list"
+              <article key={batch.id} className="overflow-hidden rounded-lg border bg-white shadow-sm">
+                <header className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 p-3">
+                  <div className="grid min-w-0 grid-cols-1 gap-1 sm:grid-cols-3 sm:gap-3">
+                    <span className="truncate text-sm font-semibold text-gray-800">{companyName}</span>
+                    <span className="truncate text-xs text-gray-500">{dispatchDate}</span>
+                    <Link
+                      href={`/projects/${batch.project_id}`}
+                      className="truncate text-xs font-medium text-blue-700 hover:underline"
                     >
-                      🔄 Load into Active Takeoff ➔
-                    </button>}
-                    {canManageRfqs && <button
-                      onClick={() => handleDeleteBatch(batch.id)}
-                      className="text-xs text-gray-400 hover:text-red-600 font-bold p-1 transition-colors"
-                      title="Delete RFQ Record"
-                    >
-                      ✕
-                    </button>}
+                      {jobName}
+                    </Link>
                   </div>
-                </div>
+                  <button
+                    type="button"
+                    aria-expanded={isExpanded}
+                    onClick={() => toggleBatchExpanded(batch.id)}
+                    className="rounded border px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                  >
+                    {isExpanded ? 'Collapse' : 'Expand'}
+                  </button>
+                </header>
+                {isExpanded && (
+                  <div className="border-t p-4">
+                    <div className="flex flex-col gap-3 pb-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <div className="text-base font-bold text-gray-800">
+                          {companyName}{' '}
+                          <span className="text-sm font-normal text-gray-600">
+                            ({contactName} — <a href={`mailto:${email}`} className="text-blue-600 hover:underline">{email}</a>)
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500">{batch.subject} · {batch.status}</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {canManageRfqs && <button
+                          onClick={() => handleReloadBatchIntoProject(batch)}
+                          className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700"
+                          title="Load these items back into the active takeoff list"
+                        >
+                          🔄 Load into Active Takeoff ➔
+                        </button>}
+                        {canManageRfqs && <button
+                          onClick={() => handleDeleteBatch(batch.id)}
+                          className="p-1 text-xs font-bold text-gray-400 transition-colors hover:text-red-600"
+                          title="Delete RFQ Record"
+                        >
+                          ✕ Delete
+                        </button>}
+                      </div>
+                    </div>
 
-                <div>
                   <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Itemized Material Package ({batch.rfq_line_items?.length || 0} items)</h4>
                   <div className="border rounded bg-gray-50 overflow-hidden">
                     <table className="w-full text-left border-collapse text-xs">
@@ -284,7 +337,8 @@ export default function RFQHistoryPage() {
                     </table>
                   </div>
                 </div>
-              </div>
+                )}
+              </article>
             )
           })}
 
@@ -296,7 +350,9 @@ export default function RFQHistoryPage() {
 
           {history.length === 0 && (
             <div className="bg-white border rounded-lg p-12 text-center text-gray-400 text-sm">
-              No sent RFQ records found. Dispatched vendor quotes from your project dashboards will automatically log here!
+              {projectId
+                ? 'No RFQ records found for this project.'
+                : 'No sent RFQ records found. Dispatched vendor quotes from your project dashboards will automatically log here!'}
             </div>
           )}
         </div>

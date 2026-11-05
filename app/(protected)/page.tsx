@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { hasAnyRole, useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
-import { Archive, ArrowUpRight, CircleCheck, ClipboardList, Gavel, LoaderCircle, Plus } from 'lucide-react'
+import { Archive, ArrowUpRight, CircleCheck, ClipboardList, Gavel, LoaderCircle, Plus, Trash2 } from 'lucide-react'
 
 interface Project {
   id: string
@@ -19,12 +19,14 @@ export default function Home() {
   const router = useRouter()
   const { roles } = useAuth()
   const canCreateProjects = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
+  const isAdmin = hasAnyRole(roles, ['ADMIN'])
   const [projects, setProjects] = useState<Project[]>([])
   const [projectName, setProjectName] = useState('')
   const [rfqProjectId, setRfqProjectId] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [savingStatusProjectId, setSavingStatusProjectId] = useState<string | null>(null)
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function fetchProjects() {
@@ -97,6 +99,43 @@ export default function Home() {
     }
   }
 
+  async function handleDeleteProject(project: Project) {
+    if (!confirm(`Permanently delete "${project.name}" and all associated takeoff, RFQ, quote, and invoice records? This cannot be undone.`)) return
+
+    setDeletingProjectId(project.id)
+    setError(null)
+    try {
+      const { data: session, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError || !session.session?.access_token) {
+        setError(`Unable to verify your sign-in: ${sessionError?.message || 'Sign in again before deleting a project.'}`)
+        return
+      }
+
+      const response = await fetch(`/api/projects/${project.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${session.session.access_token}` }
+      })
+      const responseData: unknown = await response.json()
+      if (!response.ok || typeof responseData !== 'object' || responseData === null
+        || !('deleted' in responseData) || responseData.deleted !== true) {
+        const message = typeof responseData === 'object' && responseData !== null
+          && 'error' in responseData && typeof responseData.error === 'string'
+          ? responseData.error
+          : 'Unable to delete project.'
+        setError(message)
+        return
+      }
+
+      setProjects(current => current.filter(item => item.id !== project.id))
+      setRfqProjectId(current => current === project.id ? '' : current)
+      if ('warning' in responseData && typeof responseData.warning === 'string') setError(responseData.warning)
+    } catch (deleteError) {
+      setError(`Unable to delete project: ${deleteError instanceof Error ? deleteError.message : 'Unexpected network error.'}`)
+    } finally {
+      setDeletingProjectId(null)
+    }
+  }
+
   function renderProjectCard(project: Project) {
     const status = (project.status || 'bidding').toLowerCase()
     return (
@@ -141,6 +180,17 @@ export default function Home() {
           <span className="mt-4 inline-block rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs capitalize text-slate-600 dark:bg-slate-800 dark:text-slate-300">
             {project.status || 'bidding'}
           </span>
+        )}
+        {isAdmin && (
+          <button
+            type="button"
+            disabled={deletingProjectId === project.id}
+            onClick={() => void handleDeleteProject(project)}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 disabled:cursor-wait disabled:opacity-60 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/40"
+          >
+            <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+            {deletingProjectId === project.id ? 'Deleting…' : 'Delete project'}
+          </button>
         )}
       </article>
     )

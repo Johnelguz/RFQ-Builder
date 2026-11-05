@@ -44,6 +44,15 @@ interface Invoice {
   material_invoice_items: InvoiceItem[]
 }
 
+interface InvoiceHeaderDraft {
+  supplierId: string
+  vendorName: string
+  invoiceNumber: string
+  invoiceDate: string
+  invoiceTotal: string
+  notes: string
+}
+
 interface DraftInvoiceItem {
   description: string
   quantity: string
@@ -154,6 +163,8 @@ export default function ProjectCostsPage() {
   const projectId = params?.id as string
   const { roles, user } = useAuth()
   const canEditCosts = hasAnyRole(roles, ['ADMIN', 'COST_EDITOR'])
+  const canEditInvoiceDetails = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
+  const isAdmin = hasAnyRole(roles, ['ADMIN'])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const draftStorageKey = useMemo(
     () => user?.id && projectId ? `invoice-draft:v1:${user.id}:${projectId}` : null,
@@ -189,6 +200,9 @@ export default function ProjectCostsPage() {
   const [totalDifferenceConfirmed, setTotalDifferenceConfirmed] = useState(false)
   const [openingInvoiceId, setOpeningInvoiceId] = useState<string | null>(null)
   const [invoicePreview, setInvoicePreview] = useState<{ invoice: Invoice; url: string } | null>(null)
+  const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null)
+  const [invoiceHeaderDraft, setInvoiceHeaderDraft] = useState<InvoiceHeaderDraft | null>(null)
+  const [deletingInvoiceId, setDeletingInvoiceId] = useState<string | null>(null)
   const [collapsedInvoiceIds, setCollapsedInvoiceIds] = useState<Set<string>>(() => new Set())
   const [restoredCollapsedInvoicesKey, setRestoredCollapsedInvoicesKey] = useState<string | null>(null)
   const [restoredDraftKey, setRestoredDraftKey] = useState<string | null>(null)
@@ -787,6 +801,116 @@ export default function ProjectCostsPage() {
     }
   }
 
+  function startEditingInvoice(invoice: Invoice) {
+    setEditingInvoiceId(invoice.id)
+    setInvoiceHeaderDraft({
+      supplierId: invoice.supplier_id || '',
+      vendorName: invoice.vendor_name,
+      invoiceNumber: invoice.invoice_number || '',
+      invoiceDate: invoice.invoice_date,
+      invoiceTotal: String(invoice.invoice_total),
+      notes: invoice.notes || ''
+    })
+    setError(null)
+    setNotice(null)
+  }
+
+  async function handleSaveInvoiceHeader(event: React.FormEvent, invoice: Invoice) {
+    event.preventDefault()
+    if (!invoiceHeaderDraft || !canEditInvoiceDetails) return
+    const parsedTotal = Number(invoiceHeaderDraft.invoiceTotal)
+    if (!invoiceHeaderDraft.vendorName.trim()) {
+      setError('Enter the vendor name shown on the invoice.')
+      return
+    }
+    if (!invoiceHeaderDraft.invoiceDate) {
+      setError('Enter the invoice date.')
+      return
+    }
+    if (!invoiceHeaderDraft.invoiceTotal.trim() || !Number.isFinite(parsedTotal) || parsedTotal < 0) {
+      setError('Enter a valid non-negative invoice total.')
+      return
+    }
+
+    setError(null)
+    setNotice(null)
+    try {
+      const { data, error: updateError } = await supabase
+        .from('material_invoices')
+        .update({
+          supplier_id: invoiceHeaderDraft.supplierId || null,
+          vendor_name: invoiceHeaderDraft.vendorName.trim(),
+          invoice_number: invoiceHeaderDraft.invoiceNumber.trim() || null,
+          invoice_date: invoiceHeaderDraft.invoiceDate,
+          invoice_total: parsedTotal,
+          notes: invoiceHeaderDraft.notes.trim() || null
+        })
+        .eq('id', invoice.id)
+        .eq('project_id', projectId)
+        .eq('status', 'POSTED')
+        .select('id')
+        .single()
+
+      if (updateError || !data) {
+        setError(`Unable to update invoice details: ${updateError?.message || 'Invoice was not found or is no longer posted.'}`)
+        return
+      }
+
+      setInvoices(current => current.map(item => item.id === invoice.id
+        ? {
+            ...item,
+            supplier_id: invoiceHeaderDraft.supplierId || null,
+            vendor_name: invoiceHeaderDraft.vendorName.trim(),
+            invoice_number: invoiceHeaderDraft.invoiceNumber.trim() || null,
+            invoice_date: invoiceHeaderDraft.invoiceDate,
+            invoice_total: parsedTotal,
+            notes: invoiceHeaderDraft.notes.trim() || null
+          }
+        : item))
+      setEditingInvoiceId(null)
+      setInvoiceHeaderDraft(null)
+      setNotice('Invoice details updated.')
+    } catch (updateError) {
+      setError(`Unable to update invoice details: ${updateError instanceof Error ? updateError.message : 'Unexpected network error.'}`)
+    }
+  }
+
+  async function handleDeleteInvoice(invoice: Invoice) {
+    if (!isAdmin) return
+    if (!confirm(`Permanently delete invoice ${invoice.invoice_number || invoice.file_name} and its uploaded file? This cannot be undone.`)) return
+
+    setDeletingInvoiceId(invoice.id)
+    setError(null)
+    setNotice(null)
+    try {
+      const accessToken = await getAccessToken()
+      const response = await fetch(`/api/projects/${projectId}/invoices/${invoice.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` }
+      })
+      const responseData: unknown = await response.json()
+      if (!response.ok || !isRecord(responseData) || responseData.deleted !== true) {
+        const message = isRecord(responseData) && typeof responseData.error === 'string'
+          ? responseData.error
+          : 'Unable to delete invoice.'
+        setError(message)
+        return
+      }
+
+      setInvoices(current => current.filter(item => item.id !== invoice.id))
+      setEditingInvoiceId(null)
+      setInvoiceHeaderDraft(null)
+      if (invoicePreview?.invoice.id === invoice.id) setInvoicePreview(null)
+      setNotice(typeof responseData.warning === 'string'
+        ? responseData.warning
+        : 'Invoice and its uploaded file deleted.')
+    } catch (deleteError) {
+      setError(`Unable to delete invoice: ${deleteError instanceof Error ? deleteError.message : 'Unexpected network error.'}`)
+    } finally {
+      setDeletingInvoiceId(null)
+    }
+  }
+
   function toggleInvoiceCollapsed(invoiceId: string) {
     setCollapsedInvoiceIds(current => {
       const next = new Set(current)
@@ -1197,6 +1321,85 @@ export default function ProjectCostsPage() {
                     </header>
                     {!isCollapsed && (
                       <>
+                        {editingInvoiceId === invoice.id && invoiceHeaderDraft && (
+                          <form onSubmit={event => void handleSaveInvoiceHeader(event, invoice)} className="space-y-3 border-t bg-blue-50/40 p-4">
+                            <p className="text-xs font-semibold text-gray-700">Edit invoice header details. Recorded line items and the uploaded file are unchanged.</p>
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                              <label className="text-xs font-medium text-gray-600">
+                                Supplier
+                                <select
+                                  value={invoiceHeaderDraft.supplierId}
+                                  onChange={event => setInvoiceHeaderDraft({ ...invoiceHeaderDraft, supplierId: event.target.value })}
+                                  className="mt-1 w-full rounded border bg-white p-2 text-sm"
+                                >
+                                  <option value="">No supplier linked</option>
+                                  {suppliers.map(supplier => (
+                                    <option key={supplier.id} value={supplier.id}>{supplier.company_name}</option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="text-xs font-medium text-gray-600">
+                                Vendor name on invoice
+                                <input
+                                  required
+                                  value={invoiceHeaderDraft.vendorName}
+                                  onChange={event => setInvoiceHeaderDraft({ ...invoiceHeaderDraft, vendorName: event.target.value })}
+                                  className="mt-1 w-full rounded border bg-white p-2 text-sm"
+                                />
+                              </label>
+                              <label className="text-xs font-medium text-gray-600">
+                                Invoice number
+                                <input
+                                  value={invoiceHeaderDraft.invoiceNumber}
+                                  onChange={event => setInvoiceHeaderDraft({ ...invoiceHeaderDraft, invoiceNumber: event.target.value })}
+                                  className="mt-1 w-full rounded border bg-white p-2 text-sm"
+                                />
+                              </label>
+                              <label className="text-xs font-medium text-gray-600">
+                                Invoice date
+                                <input
+                                  required
+                                  type="date"
+                                  value={invoiceHeaderDraft.invoiceDate}
+                                  onChange={event => setInvoiceHeaderDraft({ ...invoiceHeaderDraft, invoiceDate: event.target.value })}
+                                  className="mt-1 w-full rounded border bg-white p-2 text-sm"
+                                />
+                              </label>
+                              <label className="text-xs font-medium text-gray-600">
+                                Invoice total
+                                <input
+                                  required
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={invoiceHeaderDraft.invoiceTotal}
+                                  onChange={event => setInvoiceHeaderDraft({ ...invoiceHeaderDraft, invoiceTotal: event.target.value })}
+                                  className="mt-1 w-full rounded border bg-white p-2 text-sm"
+                                />
+                              </label>
+                              <label className="text-xs font-medium text-gray-600 sm:col-span-2 lg:col-span-1">
+                                Notes
+                                <input
+                                  value={invoiceHeaderDraft.notes}
+                                  onChange={event => setInvoiceHeaderDraft({ ...invoiceHeaderDraft, notes: event.target.value })}
+                                  className="mt-1 w-full rounded border bg-white p-2 text-sm"
+                                />
+                              </label>
+                            </div>
+                            <div className="flex justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => { setEditingInvoiceId(null); setInvoiceHeaderDraft(null) }}
+                                className="rounded border bg-white px-3 py-1.5 text-xs font-semibold text-gray-700"
+                              >
+                                Cancel
+                              </button>
+                              <button type="submit" className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white">
+                                Save invoice
+                              </button>
+                            </div>
+                          </form>
+                        )}
                         <div className="flex flex-wrap items-start justify-between gap-4 border-t p-5">
                           <div>
                             <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${invoice.status === 'POSTED' ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>{invoice.status}</span>
@@ -1208,9 +1411,23 @@ export default function ProjectCostsPage() {
                               <button disabled={openingInvoiceId === invoice.id} onClick={() => void handleOpenInvoice(invoice)} className="rounded border px-3 py-1.5 text-xs font-semibold text-blue-700 disabled:opacity-50">
                                 {openingInvoiceId === invoice.id ? 'Opening…' : 'View invoice file'}
                               </button>
+                              {canEditInvoiceDetails && invoice.status === 'POSTED' && editingInvoiceId !== invoice.id && (
+                                <button onClick={() => startEditingInvoice(invoice)} className="rounded border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-700">
+                                  Edit invoice
+                                </button>
+                              )}
                               {canEditCosts && invoice.status === 'POSTED' && (
                                 <button onClick={() => void handleVoidInvoice(invoice)} className="rounded border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700">
                                   Void invoice
+                                </button>
+                              )}
+                              {isAdmin && (
+                                <button
+                                  disabled={deletingInvoiceId === invoice.id}
+                                  onClick={() => void handleDeleteInvoice(invoice)}
+                                  className="rounded border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 disabled:opacity-50"
+                                >
+                                  {deletingInvoiceId === invoice.id ? 'Deleting…' : 'Delete invoice'}
                                 </button>
                               )}
                             </div>

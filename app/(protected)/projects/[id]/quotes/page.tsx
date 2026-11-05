@@ -41,7 +41,8 @@ interface QuoteItem {
 interface VendorQuote {
   id: string
   project_id: string
-  supplier_id: string
+  supplier_id: string | null
+  supplier_name: string | null
   quote_reference: string | null
   quoted_date: string
   notes: string | null
@@ -122,7 +123,7 @@ export default function ProjectQuotesPage() {
         supabase.from('projects').select('name').eq('id', projectId).single(),
         supabase.from('materials').select('id, item_number, quantity, unit, description, manufacturer, model_number, sheet_reference, notes').eq('project_id', projectId).order('item_number', { ascending: true }),
         supabase.from('suppliers').select('id, company_name, is_active').order('company_name', { ascending: true }),
-        supabase.from('vendor_quotes').select('id, project_id, supplier_id, quote_reference, quoted_date, notes, freight, tax, other_charges, created_at, vendor_quote_items(id, source_material_id, item_number, quantity, unit, description, manufacturer, model_number, sheet_reference, notes, quoted_unit_price)').eq('project_id', projectId).order('quoted_date', { ascending: false })
+        supabase.from('vendor_quotes').select('id, project_id, supplier_id, supplier_name, quote_reference, quoted_date, notes, freight, tax, other_charges, created_at, vendor_quote_items(id, source_material_id, item_number, quantity, unit, description, manufacturer, model_number, sheet_reference, notes, quoted_unit_price)').eq('project_id', projectId).order('quoted_date', { ascending: false })
       ])
     } catch (loadError) {
       setError(`Unable to load quote data: ${loadError instanceof Error ? loadError.message : 'Unexpected network error.'}`)
@@ -267,7 +268,7 @@ export default function ProjectQuotesPage() {
   }
 
   async function handleDeleteQuote(quote: VendorQuote) {
-    const vendorName = supplierById.get(quote.supplier_id)?.company_name || 'this vendor'
+    const vendorName = quote.supplier_name || (quote.supplier_id ? supplierById.get(quote.supplier_id)?.company_name : null) || 'this vendor'
     if (!confirm(`Delete the quote from ${vendorName}${quote.quote_reference ? ` (${quote.quote_reference})` : ''}? This cannot be undone.`)) return
 
     try {
@@ -435,7 +436,7 @@ export default function ProjectQuotesPage() {
                     <tr>
                       <th className="p-3">Project material</th>
                       {quotes.map(quote => {
-                        const supplier = supplierById.get(quote.supplier_id)?.company_name || 'Unknown vendor'
+                        const supplier = quote.supplier_name || (quote.supplier_id ? supplierById.get(quote.supplier_id)?.company_name : null) || 'Unknown vendor'
                         return (
                           <th key={quote.id} className="min-w-40 p-3">
                             <span className="block text-gray-800">{supplier}</span>
@@ -497,7 +498,7 @@ export default function ProjectQuotesPage() {
             ) : (
               <div className="space-y-4">
                 {quotes.map(quote => {
-                  const supplier = supplierById.get(quote.supplier_id)?.company_name || 'Unknown vendor'
+                  const supplier = quote.supplier_name || (quote.supplier_id ? supplierById.get(quote.supplier_id)?.company_name : null) || 'Unknown vendor'
                   const quoteItems = quote.vendor_quote_items || []
                   const subtotal = quoteSubtotal(quoteItems)
                   return (

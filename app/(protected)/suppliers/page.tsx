@@ -17,7 +17,9 @@ interface Supplier {
 export default function SuppliersPage() {
   const { roles } = useAuth()
   const canManageSuppliers = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
+  const isAdmin = hasAnyRole(roles, ['ADMIN'])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null)
   const [form, setForm] = useState({
     company_name: '',
     contact_name: '',
@@ -50,29 +52,50 @@ export default function SuppliersPage() {
       .map(s => s.trim())
       .filter(Boolean)
 
-    const { error } = await supabase.from('suppliers').insert([{
+    const supplierData = {
       company_name: form.company_name,
       contact_name: form.contact_name,
       email: form.email,
-      specialties: specArray,
-      is_active: true
-    }])
+      specialties: specArray
+    }
+    const { error } = editingSupplierId
+      ? await supabase.from('suppliers').update(supplierData).eq('id', editingSupplierId)
+      : await supabase.from('suppliers').insert([{ ...supplierData, is_active: true }])
 
     if (error) {
-      alert('Error adding supplier: ' + error.message)
+      alert(`${editingSupplierId ? 'Error updating supplier: ' : 'Error adding supplier: '}${error.message}`)
     } else {
       setForm({ company_name: '', contact_name: '', email: '', specialties: '' })
+      setEditingSupplierId(null)
       fetchSuppliers()
     }
   }
 
+  function handleEditSupplier(supplier: Supplier) {
+    setEditingSupplierId(supplier.id)
+    setForm({
+      company_name: supplier.company_name,
+      contact_name: supplier.contact_name || '',
+      email: supplier.email,
+      specialties: supplier.specialties?.join(', ') || ''
+    })
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function handleCancelEdit() {
+    setEditingSupplierId(null)
+    setForm({ company_name: '', contact_name: '', email: '', specialties: '' })
+  }
+
   async function handleDeleteSupplier(id: string, companyName: string) {
-    if (!confirm(`Are you sure you want to delete ${companyName}? This will also clean up associated draft batches.`)) return
+    if (!confirm(`Permanently delete ${companyName}? Associated RFQ dispatch history will also be deleted. Invoices and vendor quotes will retain their saved vendor names.`)) return
 
-    // 1. Delete associated RFQ batches first
-    await supabase.from('rfq_batches').delete().eq('supplier_id', id)
+    const { error: batchError } = await supabase.from('rfq_batches').delete().eq('supplier_id', id)
+    if (batchError) {
+      alert(`Unable to delete associated RFQ dispatch history: ${batchError.message}`)
+      return
+    }
 
-    // 2. Delete the supplier
     const { error } = await supabase.from('suppliers').delete().eq('id', id)
 
     if (error) {
@@ -97,7 +120,9 @@ export default function SuppliersPage() {
       {canManageSuppliers && <>
       {/* Add Supplier Form */}
       <div className="bg-gray-50 p-4 rounded-lg border mb-8">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3">Add New Supplier / Sales Rep</h3>
+        <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3">
+          {editingSupplierId ? 'Edit Supplier / Sales Rep' : 'Add New Supplier / Sales Rep'}
+        </h3>
         <form onSubmit={handleAddSupplier} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1">Company Name</label>
@@ -146,8 +171,13 @@ export default function SuppliersPage() {
               type="submit"
               className="bg-blue-600 text-white px-5 py-2 rounded text-sm font-medium hover:bg-blue-700 transition-colors"
             >
-              + Add Supplier
+              {editingSupplierId ? 'Save Supplier' : '+ Add Supplier'}
             </button>
+            {editingSupplierId && (
+              <button type="button" onClick={handleCancelEdit} className="rounded border bg-white px-4 py-2 text-sm font-medium text-gray-700">
+                Cancel
+              </button>
+            )}
           </div>
         </form>
       </div>
@@ -162,7 +192,7 @@ export default function SuppliersPage() {
               <th className="p-3">Sales Rep</th>
               <th className="p-3">Email</th>
               <th className="p-3">Specialties</th>
-              {canManageSuppliers && <th className="p-3 text-right">Action</th>}
+              {canManageSuppliers && <th className="p-3 text-right">Actions</th>}
             </tr>
           </thead>
           <tbody className="divide-y text-sm">
@@ -177,12 +207,22 @@ export default function SuppliersPage() {
                     : 'General'}
                 </td>
                 {canManageSuppliers && <td className="p-3 text-right">
-                  <button
-                    onClick={() => handleDeleteSupplier(sup.id, sup.company_name)}
-                    className="text-xs bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-3 py-1 rounded font-medium transition-colors"
-                  >
-                    Delete ✕
-                  </button>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => handleEditSupplier(sup)}
+                      className="rounded border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100"
+                    >
+                      Edit
+                    </button>
+                    {isAdmin && (
+                      <button
+                        onClick={() => handleDeleteSupplier(sup.id, sup.company_name)}
+                        className="rounded border border-red-200 bg-red-50 px-3 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-100"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
                 </td>}
               </tr>
             ))}
