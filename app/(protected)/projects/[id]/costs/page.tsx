@@ -185,6 +185,7 @@ export default function ProjectCostsPage() {
   const [draftItems, setDraftItems] = useState<DraftInvoiceItem[]>([newDraftItem()])
   const [totalDifferenceConfirmed, setTotalDifferenceConfirmed] = useState(false)
   const [openingInvoiceId, setOpeningInvoiceId] = useState<string | null>(null)
+  const [invoicePreview, setInvoicePreview] = useState<{ invoice: Invoice; url: string } | null>(null)
   const [collapsedInvoiceIds, setCollapsedInvoiceIds] = useState<Set<string>>(() => new Set())
   const [restoredDraftKey, setRestoredDraftKey] = useState<string | null>(null)
 
@@ -694,14 +695,14 @@ export default function ProjectCostsPage() {
     try {
       const { data, error: signedUrlError } = await supabase.storage
         .from(INVOICE_BUCKET)
-        .createSignedUrl(invoice.file_path, 60)
+        .createSignedUrl(invoice.file_path, 300)
       if (signedUrlError || !data?.signedUrl) {
-        setError(`Unable to open invoice file: ${signedUrlError?.message || 'Supabase did not return a signed link.'}`)
+        setError(`Unable to preview invoice file: ${signedUrlError?.message || 'Supabase did not return a signed link.'}`)
         return
       }
-      window.location.assign(data.signedUrl)
+      setInvoicePreview({ invoice, url: data.signedUrl })
     } catch (openError) {
-      setError(`Unable to open invoice file: ${openError instanceof Error ? openError.message : 'Unexpected network error.'}`)
+      setError(`Unable to preview invoice file: ${openError instanceof Error ? openError.message : 'Unexpected network error.'}`)
     } finally {
       setOpeningInvoiceId(null)
     }
@@ -759,16 +760,67 @@ export default function ProjectCostsPage() {
       {error && <p role="alert" className="mb-4 rounded bg-red-50 p-3 text-sm text-red-700">{error}</p>}
       {notice && <p role="status" className="mb-4 rounded bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
 
+      {invoicePreview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-6"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setInvoicePreview(null)
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="invoice-preview-title"
+            className="flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
+          >
+            <header className="flex items-center justify-between gap-4 border-b px-4 py-3">
+              <div className="min-w-0">
+                <h2 id="invoice-preview-title" className="truncate text-sm font-semibold text-gray-800">
+                  {invoicePreview.invoice.file_name}
+                </h2>
+                <p className="text-xs text-gray-500">
+                  {invoicePreview.invoice.vendor_name}
+                  {invoicePreview.invoice.invoice_number ? ` · Invoice ${invoicePreview.invoice.invoice_number}` : ''}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <a
+                  href={invoicePreview.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded border px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                >
+                  Open in new tab
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setInvoicePreview(null)}
+                  aria-label="Close invoice preview"
+                  className="rounded border px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Close
+                </button>
+              </div>
+            </header>
+            <iframe
+              title={`Invoice preview: ${invoicePreview.invoice.file_name}`}
+              src={invoicePreview.url}
+              className="min-h-0 flex-1 bg-gray-100"
+            />
+          </section>
+        </div>
+      )}
+
       {loading ? (
         <p className="py-12 text-center text-sm text-gray-500">Loading budget and invoices…</p>
       ) : (
         <>
           <section className="mb-6 grid gap-3 md:grid-cols-3">
-            <div className="rounded-xl border bg-white p-4 shadow-sm">
+            <div className="rounded-xl border bg-white p-3 shadow-sm">
               <p className="text-xs font-semibold uppercase text-gray-500">Material budget</p>
-              <p className="mt-2 text-2xl font-bold text-gray-800">{budget == null ? 'Not set' : currency(budget)}</p>
+              <p className="mt-1 text-xl font-bold text-gray-800">{budget == null ? 'Not set' : currency(budget)}</p>
               {canEditCosts ? (
-                <form onSubmit={handleSaveBudget} className="mt-3 flex gap-2">
+                <form onSubmit={handleSaveBudget} className="mt-2 flex gap-2">
                   <input
                     type="number"
                     min="0"
@@ -777,38 +829,36 @@ export default function ProjectCostsPage() {
                     onChange={event => setBudgetValue(event.target.value)}
                     aria-label="Manual material budget"
                     placeholder="Enter budget"
-                    className="min-w-0 flex-1 rounded border p-2 text-sm"
+                    className="min-w-0 flex-1 rounded border px-2 py-1.5 text-sm"
                   />
-                  <button disabled={budgetSaving} className="rounded bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60">
+                  <button disabled={budgetSaving} className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
                     {budgetSaving ? 'Saving…' : 'Save'}
                   </button>
                 </form>
-              ) : <p className="mt-2 text-xs text-gray-500">Only Admins and Cost Editors can change the budget.</p>}
+              ) : <p className="mt-1 text-xs text-gray-500">Only Admins and Cost Editors can change the budget.</p>}
             </div>
-            <div className="rounded-xl border bg-white p-4 shadow-sm">
+            <div className="rounded-xl border bg-white p-3 shadow-sm">
               <p className="text-xs font-semibold uppercase text-gray-500">Invoice expenses</p>
-              <p className="mt-2 text-2xl font-bold text-gray-800">{currency(postedExpenses)}</p>
-              <p className="mt-2 text-xs text-gray-500">Sum of posted invoice totals only; line items are not added separately.</p>
+              <p className="mt-1 text-xl font-bold text-gray-800">{currency(postedExpenses)}</p>
+              <p className="mt-1 text-xs text-gray-500">Posted invoice totals only; line items are not added separately.</p>
             </div>
-            <div className={`rounded-xl border p-4 shadow-sm ${remainingBudget != null && remainingBudget < 0 ? 'border-red-200 bg-red-50' : 'bg-white'}`}>
+            <div className={`rounded-xl border p-3 shadow-sm ${remainingBudget != null && remainingBudget < 0 ? 'border-red-200 bg-red-50' : 'bg-white'}`}>
               <p className="text-xs font-semibold uppercase text-gray-500">Budget remaining</p>
-              <p className={`mt-2 text-2xl font-bold ${remainingBudget != null && remainingBudget < 0 ? 'text-red-700' : 'text-gray-800'}`}>
+              <p className={`mt-1 text-xl font-bold ${remainingBudget != null && remainingBudget < 0 ? 'text-red-700' : 'text-gray-800'}`}>
                 {remainingBudget == null ? 'Set a budget' : currency(remainingBudget)}
               </p>
-              {remainingBudget != null && <p className="mt-2 text-xs text-gray-500">{budget === 0 ? 'Budget is zero.' : `${((postedExpenses / (budget || 1)) * 100).toFixed(1)}% of budget spent`}</p>}
+              {remainingBudget != null && <p className="mt-1 text-xs text-gray-500">{budget === 0 ? 'Budget is zero.' : `${((postedExpenses / (budget || 1)) * 100).toFixed(1)}% of budget spent`}</p>}
             </div>
           </section>
 
-          <section aria-labelledby="budget-expenses-heading" className="mb-6 max-w-4xl rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <section aria-labelledby="budget-expenses-heading" className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 id="budget-expenses-heading" className="text-base font-semibold text-gray-800">Budget vs. expenses</h2>
                 <p className="mt-1 text-xs text-gray-500">Posted invoice totals compared with the manual material budget.</p>
               </div>
               {budget != null && budget > 0 && (
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                  remainingBudget != null && remainingBudget < 0 ? 'bg-red-50 text-red-700' : 'bg-pink-50 text-pink-700'
-                }`}>
+                <span className="rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
                   {budgetUsagePercent.toFixed(1)}% used
                 </span>
               )}
@@ -837,14 +887,14 @@ export default function ProjectCostsPage() {
                     }`}
                   >
                     <div
-                      className="h-full rounded-full bg-pink-500 transition-[width] duration-500"
+                      className="h-full rounded-full bg-red-600 transition-[width] duration-500"
                       style={{ width: `${budgetBarWidth}%` }}
                     />
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap items-start justify-between gap-x-5 gap-y-2 text-sm">
                   <div className="flex items-center">
-                    <span aria-hidden="true" className="mr-2 h-2.5 w-2.5 rounded-full bg-pink-500" />
+                    <span aria-hidden="true" className="mr-2 h-2.5 w-2.5 rounded-full bg-red-600" />
                     <span className="text-gray-500">Expenses</span>
                     <span className="ml-2 font-semibold text-gray-800">{currency(postedExpenses)}</span>
                   </div>
