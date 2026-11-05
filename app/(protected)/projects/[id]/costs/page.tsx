@@ -159,6 +159,10 @@ export default function ProjectCostsPage() {
     () => user?.id && projectId ? `invoice-draft:v1:${user.id}:${projectId}` : null,
     [projectId, user?.id]
   )
+  const collapsedInvoicesStorageKey = useMemo(
+    () => user?.id && projectId ? `collapsed-invoices:v1:${user.id}:${projectId}` : null,
+    [projectId, user?.id]
+  )
   const [projectName, setProjectName] = useState('')
   const [budgetValue, setBudgetValue] = useState('')
   const [budget, setBudget] = useState<number | null>(null)
@@ -187,6 +191,7 @@ export default function ProjectCostsPage() {
   const [openingInvoiceId, setOpeningInvoiceId] = useState<string | null>(null)
   const [invoicePreview, setInvoicePreview] = useState<{ invoice: Invoice; url: string } | null>(null)
   const [collapsedInvoiceIds, setCollapsedInvoiceIds] = useState<Set<string>>(() => new Set())
+  const [restoredCollapsedInvoicesKey, setRestoredCollapsedInvoicesKey] = useState<string | null>(null)
   const [restoredDraftKey, setRestoredDraftKey] = useState<string | null>(null)
 
   const fetchProjectCosts = useCallback(async () => {
@@ -227,6 +232,41 @@ export default function ProjectCostsPage() {
     }, 0)
     return () => window.clearTimeout(timer)
   }, [fetchProjectCosts])
+
+  useEffect(() => {
+    if (!collapsedInvoicesStorageKey) return
+
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = window.localStorage.getItem(collapsedInvoicesStorageKey)
+        if (saved) {
+          const invoiceIds: unknown = JSON.parse(saved)
+          if (!Array.isArray(invoiceIds) || !invoiceIds.every(id => typeof id === 'string')) {
+            window.localStorage.removeItem(collapsedInvoicesStorageKey)
+            setError('Saved invoice display preferences were invalid and have been cleared.')
+          } else {
+            setCollapsedInvoiceIds(new Set(invoiceIds))
+          }
+        } else {
+          setCollapsedInvoiceIds(new Set())
+        }
+      } catch (restoreError) {
+        setError(`Unable to restore invoice display preferences: ${restoreError instanceof Error ? restoreError.message : 'Browser storage is unavailable.'}`)
+      } finally {
+        setRestoredCollapsedInvoicesKey(collapsedInvoicesStorageKey)
+      }
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [collapsedInvoicesStorageKey])
+
+  useEffect(() => {
+    if (!collapsedInvoicesStorageKey || restoredCollapsedInvoicesKey !== collapsedInvoicesStorageKey) return
+    try {
+      window.localStorage.setItem(collapsedInvoicesStorageKey, JSON.stringify([...collapsedInvoiceIds]))
+    } catch (saveError) {
+      setError(`Unable to save invoice display preferences: ${saveError instanceof Error ? saveError.message : 'Browser storage is unavailable.'}`)
+    }
+  }, [collapsedInvoicesStorageKey, collapsedInvoiceIds, restoredCollapsedInvoicesKey])
 
   useEffect(() => {
     if (!draftStorageKey) return
