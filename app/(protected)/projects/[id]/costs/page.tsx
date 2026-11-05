@@ -20,11 +20,11 @@ interface InvoiceItem {
   id: string
   item_number: number | null
   description: string
-  quantity: number
+  quantity: number | null
   unit: string
   unit_price: number
   actual_line_cost: number | null
-  line_total: number
+  line_total: number | null
 }
 
 interface Invoice {
@@ -185,6 +185,7 @@ export default function ProjectCostsPage() {
   const [draftItems, setDraftItems] = useState<DraftInvoiceItem[]>([newDraftItem()])
   const [totalDifferenceConfirmed, setTotalDifferenceConfirmed] = useState(false)
   const [openingInvoiceId, setOpeningInvoiceId] = useState<string | null>(null)
+  const [collapsedInvoiceIds, setCollapsedInvoiceIds] = useState<Set<string>>(() => new Set())
   const [restoredDraftKey, setRestoredDraftKey] = useState<string | null>(null)
 
   const fetchProjectCosts = useCallback(async () => {
@@ -608,22 +609,22 @@ export default function ProjectCostsPage() {
       source_material_id: string | null
       item_number: number
       description: string
-      quantity: number
+      quantity: number | null
       unit: string
       unit_price: number
       actual_line_cost: number | null
     }> = []
     for (const [index, item] of draftItems.entries()) {
-      const quantity = Number(item.quantity)
+      const quantity = item.quantity.trim() ? Number(item.quantity) : null
       const actualLineCost = item.actual_line_cost?.trim() ? Number(item.actual_line_cost) : null
       const enteredUnitPrice = Number(item.unit_price)
       const hasValidActualLineCost = actualLineCost != null && Number.isFinite(actualLineCost) && actualLineCost >= 0
-      const unitPrice = hasValidActualLineCost && quantity > 0
+      const unitPrice = hasValidActualLineCost && quantity != null && quantity > 0
         ? Number((actualLineCost / quantity).toFixed(2))
         : enteredUnitPrice
-      if (!item.description.trim() || !item.quantity.trim() || !Number.isFinite(quantity) || quantity < 0 || !item.unit.trim()
+      if (!item.description.trim() || (quantity != null && (!Number.isFinite(quantity) || quantity < 0)) || !item.unit.trim()
         || (!hasValidActualLineCost && (!item.unit_price.trim() || !Number.isFinite(unitPrice) || unitPrice < 0))) {
-        setError(`Complete the description, quantity (zero is allowed), and unit for invoice line ${index + 1}; enter a unit cost if no actual line cost was extracted.`)
+        setError(`Complete the description and unit for invoice line ${index + 1}; enter a non-negative quantity if known, and a unit cost if no actual line cost was extracted.`)
         return
       }
       parsedItems.push({
@@ -733,6 +734,15 @@ export default function ProjectCostsPage() {
     } catch (voidError) {
       setError(`Unable to void invoice: ${voidError instanceof Error ? voidError.message : 'Unexpected network error.'}`)
     }
+  }
+
+  function toggleInvoiceCollapsed(invoiceId: string) {
+    setCollapsedInvoiceIds(current => {
+      const next = new Set(current)
+      if (next.has(invoiceId)) next.delete(invoiceId)
+      else next.add(invoiceId)
+      return next
+    })
   }
 
   return (
@@ -864,7 +874,7 @@ export default function ProjectCostsPage() {
           {canEditCosts && (
             <section className="mb-8 rounded-xl border bg-white p-5 shadow-sm">
               <h2 className="text-lg font-semibold text-gray-800">Record a material invoice</h2>
-              <p className="mt-1 text-xs text-gray-500">Upload a PDF or image to extract invoice details and line items with Google Document AI. We use each invoice line amount as its actual cost; verify the results before posting. Only the invoice total counts as the project expense.</p>
+              <p className="mt-1 text-xs text-gray-500">Upload a PDF or image to extract invoice details and line items with Google Document AI. We use each invoice line amount as its actual cost; missing quantities may be left blank. Only the invoice total counts as the project expense.</p>
               <div className="mt-5 space-y-5">
                 {!uploadedFilePath ? (
                   <div className="flex flex-wrap items-end gap-3">
@@ -969,7 +979,9 @@ export default function ProjectCostsPage() {
                   <div className="space-y-3">
                     {draftItems.map((item, index) => {
                       const extractedLineCost = item.actual_line_cost?.trim() ? Number(item.actual_line_cost) : null
-                      const calculatedLineTotal = Number(item.quantity) * Number(item.unit_price)
+                      const calculatedLineTotal = item.quantity.trim()
+                        ? Number(item.quantity) * Number(item.unit_price)
+                        : Number.NaN
                       const lineTotal = extractedLineCost != null && Number.isFinite(extractedLineCost)
                         ? extractedLineCost
                         : calculatedLineTotal
@@ -980,8 +992,8 @@ export default function ProjectCostsPage() {
                             <input required value={item.description} onChange={event => updateDraftItem(index, 'description', event.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm" />
                           </label>
                           <label className="text-xs font-medium text-gray-600 md:col-span-1">
-                            Qty
-                            <input required type="number" min="0" step="any" value={item.quantity} onChange={event => updateDraftItem(index, 'quantity', event.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm" />
+                            Qty (optional)
+                            <input type="number" min="0" step="any" value={item.quantity} onChange={event => updateDraftItem(index, 'quantity', event.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm" />
                           </label>
                           <label className="text-xs font-medium text-gray-600 md:col-span-1">
                             Unit
@@ -1044,53 +1056,70 @@ export default function ProjectCostsPage() {
               <div className="space-y-4">
                 {invoices.map(invoice => (
                   <article key={invoice.id} className={`overflow-hidden rounded-xl border bg-white shadow-sm ${invoice.status === 'VOID' ? 'opacity-75' : ''}`}>
-                    <header className="flex flex-wrap items-start justify-between gap-4 border-b p-5">
+                    <header className="flex flex-wrap items-start justify-between gap-4 p-5">
                       <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-lg font-bold text-gray-800">{invoice.vendor_name}</h3>
-                          <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${invoice.status === 'POSTED' ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>{invoice.status}</span>
-                        </div>
+                        <h3 className="text-lg font-bold text-gray-800">
+                          {invoice.supplier_id && supplierById.has(invoice.supplier_id)
+                            ? supplierById.get(invoice.supplier_id)
+                            : invoice.vendor_name}
+                        </h3>
                         <p className="mt-1 text-sm text-gray-500">
                           {invoice.invoice_number ? `Invoice ${invoice.invoice_number} · ` : ''}{invoice.invoice_date}
-                          {invoice.supplier_id && supplierById.has(invoice.supplier_id) ? ` · ${supplierById.get(invoice.supplier_id)}` : ''}
                         </p>
-                        <p className="mt-1 text-xs text-gray-500">{invoice.file_name} · {invoice.material_invoice_items?.length || 0} line{invoice.material_invoice_items?.length === 1 ? '' : 's'}</p>
                         {invoice.notes && <p className="mt-2 whitespace-pre-wrap text-sm text-gray-600">{invoice.notes}</p>}
-                        {invoice.status === 'VOID' && invoice.void_reason && <p className="mt-2 text-xs text-gray-600">Void reason: {invoice.void_reason}</p>}
                       </div>
-                      <div className="text-right">
-                        <p className="text-xs uppercase text-gray-500">{invoice.status === 'POSTED' ? 'Expense total' : 'Voided total'}</p>
-                        <p className={`text-2xl font-bold ${invoice.status === 'POSTED' ? 'text-gray-800' : 'text-gray-500 line-through'}`}>{currency(Number(invoice.invoice_total))}</p>
-                        <div className="mt-3 flex justify-end gap-2">
-                          <button disabled={openingInvoiceId === invoice.id} onClick={() => void handleOpenInvoice(invoice)} className="rounded border px-3 py-1.5 text-xs font-semibold text-blue-700 disabled:opacity-50">
-                            {openingInvoiceId === invoice.id ? 'Opening…' : 'View invoice file'}
-                          </button>
-                          {canEditCosts && invoice.status === 'POSTED' && (
-                            <button onClick={() => void handleVoidInvoice(invoice)} className="rounded border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700">
-                              Void invoice
-                            </button>
-                          )}
-                        </div>
-                      </div>
+                      <button
+                        type="button"
+                        aria-expanded={!collapsedInvoiceIds.has(invoice.id)}
+                        onClick={() => toggleInvoiceCollapsed(invoice.id)}
+                        className="rounded border px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                      >
+                        {collapsedInvoiceIds.has(invoice.id) ? 'Expand' : 'Collapse'}
+                      </button>
                     </header>
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-[600px] text-left text-sm">
-                        <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-                          <tr><th className="p-3">#</th><th className="p-3">Item / charge</th><th className="p-3">Quantity</th><th className="p-3">Unit cost</th><th className="p-3 text-right">Actual line cost</th></tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {(invoice.material_invoice_items || []).map((item, index) => (
-                            <tr key={item.id}>
-                              <td className="p-3 text-gray-500">{item.item_number ?? index + 1}</td>
-                              <td className="p-3 font-medium text-gray-800">{item.description}</td>
-                              <td className="p-3">{item.quantity} {item.unit}</td>
-                              <td className="p-3">{currency(Number(item.unit_price))}</td>
-                              <td className="p-3 text-right font-semibold">{currency(Number(item.line_total))}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    {!collapsedInvoiceIds.has(invoice.id) && (
+                      <>
+                        <div className="flex flex-wrap items-start justify-between gap-4 border-t p-5">
+                          <div>
+                            <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${invoice.status === 'POSTED' ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>{invoice.status}</span>
+                            <p className="mt-2 text-xs text-gray-500">{invoice.file_name} · {invoice.material_invoice_items?.length || 0} line{invoice.material_invoice_items?.length === 1 ? '' : 's'}</p>
+                            {invoice.status === 'VOID' && invoice.void_reason && <p className="mt-2 text-xs text-gray-600">Void reason: {invoice.void_reason}</p>}
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs uppercase text-gray-500">{invoice.status === 'POSTED' ? 'Expense total' : 'Voided total'}</p>
+                            <p className={`text-2xl font-bold ${invoice.status === 'POSTED' ? 'text-gray-800' : 'text-gray-500 line-through'}`}>{currency(Number(invoice.invoice_total))}</p>
+                            <div className="mt-3 flex justify-end gap-2">
+                              <button disabled={openingInvoiceId === invoice.id} onClick={() => void handleOpenInvoice(invoice)} className="rounded border px-3 py-1.5 text-xs font-semibold text-blue-700 disabled:opacity-50">
+                                {openingInvoiceId === invoice.id ? 'Opening…' : 'View invoice file'}
+                              </button>
+                              {canEditCosts && invoice.status === 'POSTED' && (
+                                <button onClick={() => void handleVoidInvoice(invoice)} className="rounded border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700">
+                                  Void invoice
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-[600px] text-left text-sm">
+                            <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                              <tr><th className="p-3">#</th><th className="p-3">Item / charge</th><th className="p-3">Quantity</th><th className="p-3">Unit cost</th><th className="p-3 text-right">Actual line cost</th></tr>
+                            </thead>
+                            <tbody className="divide-y">
+                              {(invoice.material_invoice_items || []).map((item, index) => (
+                                <tr key={item.id}>
+                                  <td className="p-3 text-gray-500">{item.item_number ?? index + 1}</td>
+                                  <td className="p-3 font-medium text-gray-800">{item.description}</td>
+                                  <td className="p-3">{item.quantity == null ? '—' : `${item.quantity} ${item.unit}`}</td>
+                                  <td className="p-3">{currency(Number(item.unit_price))}</td>
+                                  <td className="p-3 text-right font-semibold">{item.line_total == null ? '—' : currency(Number(item.line_total))}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    )}
                   </article>
                 ))}
               </div>

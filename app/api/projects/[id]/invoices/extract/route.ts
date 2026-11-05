@@ -251,7 +251,7 @@ export async function POST(request: Request, { params }: RouteContext) {
       warnings.push(`${linesWithEstimatedQuantity} line item quantity${linesWithEstimatedQuantity === 1 ? ' was' : 'ies were'} estimated from the extracted line amount and unit price. Review before recording.`)
     }
     if (linesWithoutExtractedQuantity > 0) {
-      warnings.push(`${linesWithoutExtractedQuantity} line item${linesWithoutExtractedQuantity === 1 ? ' has' : 's have'} no detected or derivable quantity. The quantity is left blank, the extracted actual line amount is preserved, and a quantity is required before recording.`)
+      warnings.push(`${linesWithoutExtractedQuantity} line item${linesWithoutExtractedQuantity === 1 ? ' has' : 's have'} no detected or derivable quantity. The quantity is left blank and any extracted actual line amount is preserved.`)
     }
 
     return NextResponse.json({ extracted, warnings })
