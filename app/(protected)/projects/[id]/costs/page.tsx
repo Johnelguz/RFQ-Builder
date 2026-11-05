@@ -1068,14 +1068,20 @@ export default function ProjectCostsPage() {
                         </p>
                         {invoice.notes && <p className="mt-2 whitespace-pre-wrap text-sm text-gray-600">{invoice.notes}</p>}
                       </div>
-                      <button
-                        type="button"
-                        aria-expanded={!collapsedInvoiceIds.has(invoice.id)}
-                        onClick={() => toggleInvoiceCollapsed(invoice.id)}
-                        className="rounded border px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50"
-                      >
-                        {collapsedInvoiceIds.has(invoice.id) ? 'Expand' : 'Collapse'}
-                      </button>
+                      <div className="flex items-center gap-4">
+                        <div className="text-right">
+                          <p className="text-xs uppercase text-gray-500">{invoice.status === 'POSTED' ? 'Expense total' : 'Voided total'}</p>
+                          <p className={`text-xl font-bold ${invoice.status === 'POSTED' ? 'text-gray-800' : 'text-gray-500 line-through'}`}>{currency(Number(invoice.invoice_total))}</p>
+                        </div>
+                        <button
+                          type="button"
+                          aria-expanded={!collapsedInvoiceIds.has(invoice.id)}
+                          onClick={() => toggleInvoiceCollapsed(invoice.id)}
+                          className="rounded border px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                        >
+                          {collapsedInvoiceIds.has(invoice.id) ? 'Expand' : 'Collapse'}
+                        </button>
+                      </div>
                     </header>
                     {!collapsedInvoiceIds.has(invoice.id) && (
                       <>
@@ -1086,8 +1092,6 @@ export default function ProjectCostsPage() {
                             {invoice.status === 'VOID' && invoice.void_reason && <p className="mt-2 text-xs text-gray-600">Void reason: {invoice.void_reason}</p>}
                           </div>
                           <div className="text-right">
-                            <p className="text-xs uppercase text-gray-500">{invoice.status === 'POSTED' ? 'Expense total' : 'Voided total'}</p>
-                            <p className={`text-2xl font-bold ${invoice.status === 'POSTED' ? 'text-gray-800' : 'text-gray-500 line-through'}`}>{currency(Number(invoice.invoice_total))}</p>
                             <div className="mt-3 flex justify-end gap-2">
                               <button disabled={openingInvoiceId === invoice.id} onClick={() => void handleOpenInvoice(invoice)} className="rounded border px-3 py-1.5 text-xs font-semibold text-blue-700 disabled:opacity-50">
                                 {openingInvoiceId === invoice.id ? 'Opening…' : 'View invoice file'}
