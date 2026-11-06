@@ -567,7 +567,7 @@ function TakeoffDashboard() {
       if (!isWireOrder && item.notes) body += ` - Note: ${item.notes}`
       body += `\n`
     })
-    body += `\nPlease reply with pricing, lead times, and freight terms at your earliest convenience.\n\nThank you,\nJohn Guzman`
+    body += `\nPlease reply with pricing, lead times, and freight terms at your earliest convenience.\n\nThank you,\nJohn Guzman\n219-690-85200\nM PHase Electric | www.MPhaseElectric.com | 732-571-8909`
     return body
   }
 
