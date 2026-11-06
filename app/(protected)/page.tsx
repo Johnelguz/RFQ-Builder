@@ -13,6 +13,27 @@ interface Project {
   location: string | null
   status: string | null
   updated_at: string | null
+  material_budget: number | null
+  invoice_count: number | null
+  rfq_count: number | null
+  expenses: number | null
+}
+
+function compactCurrency(value: number | null) {
+  return value == null
+    ? '—'
+    : new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        notation: 'compact',
+        maximumFractionDigits: 1
+      }).format(value)
+}
+
+function fullCurrency(value: number | null) {
+  return value == null
+    ? 'Not set'
+    : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value)
 }
 
 export default function Home() {
@@ -30,17 +51,79 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null)
 
   async function fetchProjects() {
-    const { data, error: projectError } = await supabase
-      .from('projects')
-      .select('id, name, job_number, location, status, updated_at')
-      .order('updated_at', { ascending: false })
+    try {
+      const { data, error: projectError } = await supabase
+        .from('projects')
+        .select('id, name, job_number, location, status, updated_at, material_budget')
+        .order('updated_at', { ascending: false })
 
-    if (projectError) setError(`Unable to load projects: ${projectError.message}`)
-    else {
-      setProjects(data || [])
+      if (projectError) {
+        setError(`Unable to load projects: ${projectError.message}`)
+        setLoading(false)
+        return
+      }
+
+      if (!data?.length) {
+        setProjects([])
+        setError(null)
+        setLoading(false)
+        return
+      }
+
+      const projectIds = data.map(project => project.id)
+      const [invoiceResult, rfqResult] = await Promise.all([
+        supabase
+          .from('material_invoices')
+          .select('project_id, invoice_total')
+          .eq('status', 'POSTED')
+          .in('project_id', projectIds),
+        supabase
+          .from('rfq_batches')
+          .select('project_id')
+          .in('project_id', projectIds)
+      ])
+
+      if (invoiceResult.error || rfqResult.error) {
+        const details = [invoiceResult.error?.message, rfqResult.error?.message].filter(Boolean).join('; ')
+        setProjects(data.map(project => ({
+          ...project,
+          invoice_count: null,
+          rfq_count: null,
+          expenses: null
+        })))
+        setError(`Unable to load project snapshots: ${details}`)
+        setLoading(false)
+        return
+      }
+
+      const invoicesByProject = new Map<string, { count: number; expenses: number }>()
+      for (const invoice of invoiceResult.data || []) {
+        const summary = invoicesByProject.get(invoice.project_id) || { count: 0, expenses: 0 }
+        summary.count += 1
+        summary.expenses += Number(invoice.invoice_total)
+        invoicesByProject.set(invoice.project_id, summary)
+      }
+
+      const rfqsByProject = new Map<string, number>()
+      for (const rfq of rfqResult.data || []) {
+        rfqsByProject.set(rfq.project_id, (rfqsByProject.get(rfq.project_id) || 0) + 1)
+      }
+
+      setProjects(data.map(project => {
+        const invoiceSummary = invoicesByProject.get(project.id)
+        return {
+          ...project,
+          invoice_count: invoiceSummary?.count || 0,
+          rfq_count: rfqsByProject.get(project.id) || 0,
+          expenses: invoiceSummary?.expenses || 0
+        }
+      }))
       setError(null)
+    } catch (fetchError) {
+      setError(`Unable to load project snapshots: ${fetchError instanceof Error ? fetchError.message : 'Unexpected network error.'}`)
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   useEffect(() => {
@@ -150,42 +233,57 @@ export default function Home() {
             router.push(`/projects/${project.id}`)
           }
         }}
-        className="group cursor-pointer rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 ease-out hover:scale-[1.02] hover:border-blue-300 hover:shadow-lg active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-800 dark:focus-visible:ring-offset-slate-950"
+        className="group cursor-pointer rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition-all duration-200 ease-out hover:scale-[1.02] hover:border-blue-300 hover:shadow-lg active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-800 dark:focus-visible:ring-offset-slate-950"
       >
         <div className="flex w-full items-center justify-between gap-3 text-left text-base font-semibold text-slate-900 transition-colors group-hover:text-blue-700 dark:text-slate-100 dark:group-hover:text-blue-300">
           <span className="truncate">{project.name}</span>
           <ArrowUpRight aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-400 opacity-70 transition-all group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-blue-600 group-hover:opacity-100 dark:group-hover:text-blue-300" />
         </div>
-        <span className="mt-2 block text-xs leading-5 text-slate-500 dark:text-slate-400">
-          {project.job_number ? `Job ${project.job_number}` : 'No job number'}
-          {project.location ? ` · ${project.location}` : ''}
-        </span>
-        {canCreateProjects ? (
-          <label onClick={event => event.stopPropagation()} className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
-            Status
-            <select
-              value={status}
-              disabled={savingStatusProjectId === project.id}
-              onChange={event => void handleProjectStatusChange(project.id, event.target.value)}
-              aria-label={`Status for ${project.name}`}
-              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-            >
-              {!knownStatuses.includes(status) && <option value={status}>{project.status}</option>}
-              <option value="awarded">Awarded</option>
-              <option value="bidding">Bidding</option>
-              <option value="closed">Closed</option>
-            </select>
-            {savingStatusProjectId === project.id && (
-              <span role="status" aria-label="Saving status">
-                <LoaderCircle aria-hidden="true" className="h-3.5 w-3.5 animate-spin text-blue-600" />
-              </span>
-            )}
-          </label>
-        ) : (
-          <span className="mt-4 inline-block rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs capitalize text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-            {project.status || 'bidding'}
+        <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
+          <span title={[project.job_number ? `Job ${project.job_number}` : 'No job number', project.location].filter(Boolean).join(' · ')} className="min-w-0 truncate text-[11px] leading-5 text-slate-500 dark:text-slate-400">
+            {project.job_number ? `Job ${project.job_number}` : 'No job number'}
+            {project.location ? ` · ${project.location}` : ''}
           </span>
-        )}
+          {canCreateProjects ? (
+            <label onClick={event => event.stopPropagation()} className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-slate-600 dark:text-slate-300">
+              <span className="sr-only">Status</span>
+              <select
+                value={status}
+                disabled={savingStatusProjectId === project.id}
+                onChange={event => void handleProjectStatusChange(project.id, event.target.value)}
+                aria-label={`Status for ${project.name}`}
+                className="rounded-md border border-slate-200 bg-white px-1.5 py-1 text-[10px] capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              >
+                {!knownStatuses.includes(status) && <option value={status}>{project.status}</option>}
+                <option value="awarded">Awarded</option>
+                <option value="bidding">Bidding</option>
+                <option value="closed">Closed</option>
+              </select>
+              {savingStatusProjectId === project.id && (
+                <span role="status" aria-label="Saving status">
+                  <LoaderCircle aria-hidden="true" className="h-3.5 w-3.5 animate-spin text-blue-600" />
+                </span>
+              )}
+            </label>
+          ) : (
+            <span className="shrink-0 rounded-md bg-slate-100 px-2 py-1 text-[10px] capitalize leading-4 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              {project.status || 'bidding'}
+            </span>
+          )}
+        </div>
+        <div aria-label={`Project snapshot: ${project.invoice_count ?? 'unavailable'} posted invoices, ${project.rfq_count ?? 'unavailable'} RFQs, budget ${fullCurrency(project.material_budget)}, expenses ${fullCurrency(project.expenses)}`} className="mt-1.5 grid grid-cols-4 gap-1 border-t border-slate-100 pt-1.5 dark:border-slate-800">
+          {[
+            { label: 'Invoices', value: project.invoice_count == null ? '—' : String(project.invoice_count), title: 'Posted invoices' },
+            { label: 'RFQs', value: project.rfq_count == null ? '—' : String(project.rfq_count), title: 'RFQ history entries' },
+            { label: 'Budget', value: compactCurrency(project.material_budget), title: `Budget: ${fullCurrency(project.material_budget)}` },
+            { label: 'Spent', value: compactCurrency(project.expenses), title: `Posted invoice expenses: ${fullCurrency(project.expenses)}` }
+          ].map(metric => (
+            <div key={metric.label} title={metric.title} className="min-w-0">
+              <span className="block truncate text-[9px] font-medium uppercase leading-3 tracking-wide text-slate-400 dark:text-slate-500">{metric.label}</span>
+              <span className="block truncate text-xs font-semibold leading-4 tabular-nums text-slate-700 dark:text-slate-200">{metric.value}</span>
+            </div>
+          ))}
+        </div>
         {isAdmin && (
           <button
             type="button"
@@ -194,7 +292,7 @@ export default function Home() {
               event.stopPropagation()
               void handleDeleteProject(project)
             }}
-            className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 disabled:cursor-wait disabled:opacity-60 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/40"
+            className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 disabled:cursor-wait disabled:opacity-60 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/40"
           >
             <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
             {deletingProjectId === project.id ? 'Deleting…' : 'Delete project'}
