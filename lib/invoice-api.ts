@@ -74,10 +74,10 @@ export async function getInvoiceApiContext(
   ])
 
   if (membershipError || projectError) {
-    return { context: null, error: 'Unable to verify invoice access.', status: 500 }
+    return { context: null, error: 'Unable to verify project access.', status: 500 }
   }
   if (!memberships?.length) {
-    return { context: null, error: 'You do not have permission to access invoice files.', status: 403 }
+    return { context: null, error: 'You do not have permission to access files for this project.', status: 403 }
   }
   if (!project) return { context: null, error: 'Project not found.', status: 404 }
 

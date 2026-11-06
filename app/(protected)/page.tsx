@@ -141,22 +141,27 @@ export default function Home() {
     return (
       <article
         key={project.id}
-        className="group rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 ease-out hover:scale-[1.02] hover:border-blue-300 hover:shadow-lg active:scale-[0.99] dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-800"
+        role="link"
+        tabIndex={0}
+        aria-label={`Open ${project.name}`}
+        onClick={() => router.push(`/projects/${project.id}`)}
+        onKeyDown={event => {
+          if (event.target === event.currentTarget && event.key === 'Enter') {
+            router.push(`/projects/${project.id}`)
+          }
+        }}
+        className="group cursor-pointer rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-200 ease-out hover:scale-[1.02] hover:border-blue-300 hover:shadow-lg active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-800 dark:focus-visible:ring-offset-slate-950"
       >
-        <button
-          type="button"
-          onClick={() => router.push(`/projects/${project.id}`)}
-          className="flex w-full items-center justify-between gap-3 text-left text-base font-semibold text-slate-900 transition-colors group-hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:text-slate-100 dark:group-hover:text-blue-300 dark:focus-visible:ring-offset-slate-900"
-        >
+        <div className="flex w-full items-center justify-between gap-3 text-left text-base font-semibold text-slate-900 transition-colors group-hover:text-blue-700 dark:text-slate-100 dark:group-hover:text-blue-300">
           <span className="truncate">{project.name}</span>
           <ArrowUpRight aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-400 opacity-70 transition-all group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-blue-600 group-hover:opacity-100 dark:group-hover:text-blue-300" />
-        </button>
+        </div>
         <span className="mt-2 block text-xs leading-5 text-slate-500 dark:text-slate-400">
           {project.job_number ? `Job ${project.job_number}` : 'No job number'}
           {project.location ? ` · ${project.location}` : ''}
         </span>
         {canCreateProjects ? (
-          <label className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+          <label onClick={event => event.stopPropagation()} className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
             Status
             <select
               value={status}
@@ -185,7 +190,10 @@ export default function Home() {
           <button
             type="button"
             disabled={deletingProjectId === project.id}
-            onClick={() => void handleDeleteProject(project)}
+            onClick={event => {
+              event.stopPropagation()
+              void handleDeleteProject(project)
+            }}
             className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 disabled:cursor-wait disabled:opacity-60 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/40"
           >
             <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
