@@ -63,10 +63,6 @@ interface VendorQuote {
   vendor_quote_items: QuoteItem[]
 }
 
-interface QuoteDraftItem extends Material {
-  quoted_unit_price: string
-}
-
 function localDateString() {
   const date = new Date()
   const year = date.getFullYear()
@@ -118,18 +114,8 @@ export default function ProjectQuotesPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [quotes, setQuotes] = useState<VendorQuote[]>([])
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [supplierId, setSupplierId] = useState('')
-  const [quoteReference, setQuoteReference] = useState('')
-  const [quotedDate, setQuotedDate] = useState(localDateString)
-  const [notes, setNotes] = useState('')
-  const [freight, setFreight] = useState('0')
-  const [tax, setTax] = useState('0')
-  const [otherCharges, setOtherCharges] = useState('0')
-  const [draftItems, setDraftItems] = useState<QuoteDraftItem[]>([])
-  const [materialCategory, setMaterialCategory] = useState('General')
   const [uploadSupplierId, setUploadSupplierId] = useState('')
   const [uploadCategory, setUploadCategory] = useState('General')
   const [quoteLabel, setQuoteLabel] = useState('')
@@ -193,7 +179,6 @@ export default function ProjectQuotesPage() {
       ...quote,
       supplier_name: savedSupplierNames.get(quote.id) || null
     })) as unknown as VendorQuote[])
-    setDraftItems(projectMaterials.map(material => ({ ...material, quoted_unit_price: '' })))
     setError(null)
   }, [projectId])
 
@@ -216,115 +201,6 @@ export default function ProjectQuotesPage() {
     }
     return [...groups.values()].sort((a, b) => a.category.localeCompare(b.category))
   }, [quotes])
-  const draftSubtotal = useMemo(() => draftItems.reduce((sum, item) => {
-    const price = item.quoted_unit_price.trim() === '' ? null : Number(item.quoted_unit_price)
-    return sum + (price == null || !Number.isFinite(price) ? 0 : Number(item.quantity) * price)
-  }, 0), [draftItems])
-
-  const extraCharges = useMemo(() => {
-    return [freight, tax, otherCharges].reduce((sum, value) => {
-      const parsed = Number(value)
-      return sum + (Number.isFinite(parsed) && parsed >= 0 ? parsed : 0)
-    }, 0)
-  }, [freight, tax, otherCharges])
-
-  function updateDraftPrice(materialId: string, value: string) {
-    setDraftItems(current => current.map(item => item.id === materialId
-      ? { ...item, quoted_unit_price: value }
-      : item))
-  }
-
-  async function handleSaveQuote(event: React.FormEvent) {
-    event.preventDefault()
-    setError(null)
-    setNotice(null)
-
-    if (!canManageQuotes) {
-      setError('You do not have permission to enter vendor quotes.')
-      return
-    }
-    if (!supplierId) {
-      setError('Select a vendor for this quote.')
-      return
-    }
-    if (draftItems.length === 0) {
-      setError('This project has no takeoff items to include in a quote.')
-      return
-    }
-
-    const enteredPrices: number[] = []
-    for (const item of draftItems) {
-      if (!item.quoted_unit_price.trim()) continue
-      const price = Number(item.quoted_unit_price)
-      if (!Number.isFinite(price) || price < 0) {
-        setError(`Enter a valid non-negative unit price for item #${item.item_number ?? '—'}, or leave it blank if the vendor did not price it.`)
-        return
-      }
-      enteredPrices.push(price)
-    }
-    if (enteredPrices.length === 0) {
-      setError('Enter at least one quoted unit price before saving.')
-      return
-    }
-
-    const charges = [freight, tax, otherCharges].map(Number)
-    if (charges.some(value => !Number.isFinite(value) || value < 0)) {
-      setError('Freight, tax, and other charges must be valid non-negative amounts.')
-      return
-    }
-    if (!quotedDate) {
-      setError('Enter the date shown on the vendor quote.')
-      return
-    }
-
-    setSaving(true)
-    try {
-      const { error: saveError } = await supabase.rpc('create_vendor_quote', {
-        p_project_id: projectId,
-        p_supplier_id: supplierId,
-        p_quote_reference: quoteReference.trim() || null,
-        p_quoted_date: quotedDate,
-        p_notes: notes.trim() || null,
-        p_freight: charges[0],
-        p_tax: charges[1],
-        p_other_charges: charges[2],
-        p_material_category: materialCategory.trim() || 'General',
-        p_items: draftItems.map(item => ({
-          source_material_id: item.id,
-          item_number: item.item_number,
-          quantity: item.quantity,
-          unit: item.unit,
-          description: item.description,
-          manufacturer: item.manufacturer,
-          model_number: item.model_number,
-          sheet_reference: item.sheet_reference,
-          notes: item.notes,
-          quoted_unit_price: item.quoted_unit_price.trim() ? Number(item.quoted_unit_price) : null
-        }))
-      })
-
-      if (saveError) {
-        setError(`Unable to save the quote: ${saveError.message}`)
-        return
-      }
-
-      const selectedSupplier = supplierById.get(supplierId)?.company_name || 'Vendor'
-      setNotice(`Quote from ${selectedSupplier} saved.`)
-      setSupplierId('')
-      setQuoteReference('')
-      setQuotedDate(localDateString())
-      setNotes('')
-      setFreight('0')
-      setTax('0')
-      setOtherCharges('0')
-      setMaterialCategory('General')
-      await fetchProjectData()
-    } catch (saveError) {
-      setError(`Unable to save the quote: ${saveError instanceof Error ? saveError.message : 'Unexpected network error.'}`)
-    } finally {
-      setSaving(false)
-    }
-  }
 
   async function handleDeleteQuote(quote: VendorQuote) {
     const vendorName = quote.supplier_name || (quote.supplier_id ? supplierById.get(quote.supplier_id)?.company_name : null) || 'this vendor'
@@ -582,117 +458,6 @@ export default function ProjectQuotesPage() {
                   {uploadingQuote ? 'Uploading quote…' : 'Upload quote'}
                 </button>
               </form>
-            </section>
-          )}
-
-          {canManageQuotes && (
-            <section className="mb-8 rounded-xl border bg-white p-5 shadow-sm">
-              <h2 className="text-lg font-semibold text-gray-800">Record a vendor quote</h2>
-              <p className="mt-1 text-xs text-gray-500">Prices are saved with a snapshot of today’s takeoff, so later takeoff edits won’t alter this quote.</p>
-              {materials.length === 0 ? (
-                <p className="mt-4 rounded bg-amber-50 p-3 text-sm text-amber-800">Add project takeoff materials before recording a quote.</p>
-              ) : (
-                <form onSubmit={handleSaveQuote} className="mt-5 space-y-5">
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                    <label className="text-sm font-medium text-gray-700">
-                      Vendor
-                      <select required value={supplierId} onChange={event => setSupplierId(event.target.value)} className="mt-1 w-full rounded border bg-white p-2.5">
-                        <option value="">Select vendor</option>
-                        {suppliers.filter(supplier => supplier.is_active).map(supplier => (
-                          <option key={supplier.id} value={supplier.id}>{supplier.company_name}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="text-sm font-medium text-gray-700">
-                      Quote number / reference
-                      <input value={quoteReference} onChange={event => setQuoteReference(event.target.value)} className="mt-1 w-full rounded border p-2.5" placeholder="Optional" />
-                    </label>
-                    <label className="text-sm font-medium text-gray-700">
-                      Material category
-                      <input required value={materialCategory} onChange={event => setMaterialCategory(event.target.value)} className="mt-1 w-full rounded border p-2.5" placeholder="e.g. Panelboards" />
-                    </label>
-                    <label className="text-sm font-medium text-gray-700">
-                      Quote date
-                      <input type="date" required value={quotedDate} onChange={event => setQuotedDate(event.target.value)} className="mt-1 w-full rounded border p-2.5" />
-                    </label>
-                    <label className="text-sm font-medium text-gray-700">
-                      Freight
-                      <input type="number" min="0" step="0.01" value={freight} onChange={event => setFreight(event.target.value)} className="mt-1 w-full rounded border p-2.5" />
-                    </label>
-                  </div>
-
-                  <div className="overflow-x-auto rounded-lg border">
-                    <table className="w-full min-w-[800px] text-left text-sm">
-                      <thead className="bg-gray-100 text-xs uppercase text-gray-600">
-                        <tr>
-                          <th className="p-3">#</th>
-                          <th className="p-3">Quantity</th>
-                          <th className="p-3">Material</th>
-                          <th className="p-3">Manufacturer / model</th>
-                          <th className="p-3">Quoted unit price</th>
-                          <th className="p-3 text-right">Line total</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {draftItems.map(item => {
-                          const price = item.quoted_unit_price.trim() ? Number(item.quoted_unit_price) : null
-                          return (
-                            <tr key={item.id}>
-                              <td className="p-3 text-gray-500">{item.item_number ?? '—'}</td>
-                              <td className="p-3">{item.quantity} {item.unit}</td>
-                              <td className="p-3">
-                                <span className="font-medium text-gray-800">{item.description}</span>
-                                {item.sheet_reference && <span className="ml-2 text-xs text-gray-500">Ref: {item.sheet_reference}</span>}
-                              </td>
-                              <td className="p-3 text-gray-600">{[item.manufacturer, item.model_number].filter(Boolean).join(' · ') || '—'}</td>
-                              <td className="p-3">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={item.quoted_unit_price}
-                                  onChange={event => updateDraftPrice(item.id, event.target.value)}
-                                  aria-label={`Quoted unit price for ${item.description}`}
-                                  placeholder="Leave blank if unpriced"
-                                  className="w-44 rounded border p-2"
-                                />
-                              </td>
-                              <td className="p-3 text-right font-medium">{price == null || !Number.isFinite(price) ? '—' : currency(Number(item.quantity) * price)}</td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <label className="text-sm font-medium text-gray-700">
-                      Quote notes
-                      <textarea value={notes} onChange={event => setNotes(event.target.value)} rows={3} className="mt-1 w-full rounded border p-2.5" placeholder="Availability, exclusions, validity period, or other terms" />
-                    </label>
-                    <div className="rounded-lg bg-gray-50 p-4">
-                      <div className="grid grid-cols-2 gap-3">
-                        <label className="text-xs font-medium text-gray-600">
-                          Tax
-                          <input type="number" min="0" step="0.01" value={tax} onChange={event => setTax(event.target.value)} className="mt-1 w-full rounded border p-2 text-sm" />
-                        </label>
-                        <label className="text-xs font-medium text-gray-600">
-                          Other charges
-                          <input type="number" min="0" step="0.01" value={otherCharges} onChange={event => setOtherCharges(event.target.value)} className="mt-1 w-full rounded border p-2 text-sm" />
-                        </label>
-                      </div>
-                      <div className="mt-4 space-y-1 border-t pt-3 text-sm">
-                        <div className="flex justify-between"><span>Priced materials subtotal</span><strong>{currency(draftSubtotal)}</strong></div>
-                        <div className="flex justify-between text-gray-600"><span>Freight, tax, and other charges</span><span>{currency(extraCharges)}</span></div>
-                        <div className="flex justify-between border-t pt-2 text-base font-bold"><span>Quote total</span><span>{currency(draftSubtotal + extraCharges)}</span></div>
-                      </div>
-                      <button disabled={saving || !supplierId} className="mt-4 w-full rounded bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
-                        {saving ? 'Saving quote…' : 'Save vendor quote'}
-                      </button>
-                    </div>
-                  </div>
-                </form>
-              )}
             </section>
           )}
 
