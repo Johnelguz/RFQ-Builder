@@ -370,19 +370,38 @@ export default function ProjectQuotesPage() {
 
       setUploadingQuote(true)
       let uploadedFilePath: string | null = null
+      let fileUploaded = false
+      let accessToken = ''
       try {
         const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
         if (sessionError) throw new Error(`Unable to verify your sign-in: ${sessionError.message}`)
-        const accessToken = sessionData.session?.access_token
+        accessToken = sessionData.session?.access_token || ''
         if (!accessToken) throw new Error('Sign in again before uploading a vendor quote.')
 
-        const safeFileName = quoteFile.name.normalize('NFKC').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-180) || 'quote'
-        uploadedFilePath = `${projectId}/${crypto.randomUUID()}/${safeFileName}`
-        const { error: uploadError } = await supabase.storage.from(QUOTE_BUCKET).upload(uploadedFilePath, quoteFile, {
-          contentType: quoteFile.type,
-          upsert: false
+        const uploadUrlResponse = await fetch(`/api/projects/${projectId}/quotes/upload`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileName: quoteFile.name, mimeType: quoteFile.type, size: quoteFile.size })
         })
+        const uploadUrlData: unknown = await uploadUrlResponse.json()
+        if (!uploadUrlResponse.ok || typeof uploadUrlData !== 'object' || uploadUrlData === null
+          || !('filePath' in uploadUrlData) || typeof uploadUrlData.filePath !== 'string'
+          || !('token' in uploadUrlData) || typeof uploadUrlData.token !== 'string') {
+          const message = typeof uploadUrlData === 'object' && uploadUrlData !== null
+            && 'error' in uploadUrlData && typeof uploadUrlData.error === 'string'
+            ? uploadUrlData.error
+            : 'Unable to prepare private quote upload.'
+          throw new Error(message)
+        }
+
+        uploadedFilePath = uploadUrlData.filePath
+        const { error: uploadError } = await supabase.storage.from(QUOTE_BUCKET)
+          .uploadToSignedUrl(uploadedFilePath, uploadUrlData.token, quoteFile, {
+            contentType: quoteFile.type,
+            upsert: false
+          })
         if (uploadError) throw new Error(`Unable to upload quote file: ${uploadError.message}`)
+        fileUploaded = true
 
         let quotedTotal: number | null = null
         let extractionNotice = ''
@@ -429,9 +448,24 @@ export default function ProjectQuotesPage() {
         await fetchProjectData()
       } catch (uploadError) {
         let message = uploadError instanceof Error ? uploadError.message : 'Unexpected upload error.'
-        if (uploadedFilePath) {
-          const { error: cleanupError } = await supabase.storage.from(QUOTE_BUCKET).remove([uploadedFilePath])
-          if (cleanupError) message += ` The uploaded file could not be removed: ${cleanupError.message}`
+        if (uploadedFilePath && fileUploaded) {
+          try {
+            const cleanupResponse = await fetch(`/api/projects/${projectId}/quotes/upload`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ filePath: uploadedFilePath })
+            })
+            if (!cleanupResponse.ok) {
+              const cleanupData: unknown = await cleanupResponse.json()
+              const cleanupMessage = typeof cleanupData === 'object' && cleanupData !== null
+                && 'error' in cleanupData && typeof cleanupData.error === 'string'
+                ? cleanupData.error
+                : 'Unable to remove the unused quote upload.'
+              message += ` ${cleanupMessage}`
+            }
+          } catch (cleanupError) {
+            message += ` Unable to remove the unused quote upload: ${cleanupError instanceof Error ? cleanupError.message : 'Unexpected network error.'}`
+          }
         }
         setError(message)
       } finally {
@@ -444,12 +478,29 @@ export default function ProjectQuotesPage() {
       setOpeningQuoteId(quote.id)
       setError(null)
       try {
-        const { data, error: previewError } = await supabase.storage.from(QUOTE_BUCKET).createSignedUrl(quote.file_path, 300)
-        if (previewError || !data?.signedUrl) {
-          setError(`Unable to preview quote file: ${previewError?.message || 'Supabase did not return a signed link.'}`)
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+        if (sessionError || !sessionData.session?.access_token) {
+          throw new Error(sessionError?.message || 'Sign in again before previewing a quote.')
+        }
+        const response = await fetch(`/api/projects/${projectId}/quotes/preview`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${sessionData.session.access_token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ quoteId: quote.id })
+        })
+        const responseData: unknown = await response.json()
+        if (!response.ok || typeof responseData !== 'object' || responseData === null
+          || !('signedUrl' in responseData) || typeof responseData.signedUrl !== 'string') {
+          const message = typeof responseData === 'object' && responseData !== null
+            && 'error' in responseData && typeof responseData.error === 'string'
+            ? responseData.error
+            : 'Unable to create a quote preview link.'
+          setError(`Unable to preview quote file: ${message}`)
           return
         }
-        setQuotePreview({ quote, url: data.signedUrl })
+        setQuotePreview({ quote, url: responseData.signedUrl })
       } catch (previewError) {
         setError(`Unable to preview quote file: ${previewError instanceof Error ? previewError.message : 'Unexpected network error.'}`)
       } finally {

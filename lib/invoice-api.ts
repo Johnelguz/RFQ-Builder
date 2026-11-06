@@ -28,6 +28,12 @@ interface InvoiceApiDatabase {
         Update: { id?: string; project_id?: string; file_path?: string }
         Relationships: []
       }
+      vendor_quotes: {
+        Row: { id: string; project_id: string; file_path: string | null }
+        Insert: { id?: string; project_id: string; file_path?: string | null }
+        Update: { id?: string; project_id?: string; file_path?: string | null }
+        Relationships: []
+      }
     }
     Views: Record<string, never>
     Functions: Record<string, never>
