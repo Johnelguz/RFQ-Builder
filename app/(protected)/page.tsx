@@ -221,6 +221,25 @@ export default function Home() {
 
   function renderProjectCard(project: Project) {
     const status = (project.status || 'bidding').toLowerCase()
+    const statusColors = status === 'awarded'
+      ? {
+          badge: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/50 dark:text-emerald-300',
+          dot: 'bg-emerald-500'
+        }
+      : status === 'bidding'
+        ? {
+            badge: 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/70 dark:bg-blue-950/50 dark:text-blue-300',
+            dot: 'bg-blue-500'
+          }
+        : status === 'closed'
+          ? {
+              badge: 'border-slate-200 bg-slate-100 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300',
+              dot: 'bg-slate-400'
+            }
+          : {
+              badge: 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/70 dark:bg-violet-950/50 dark:text-violet-300',
+              dot: 'bg-violet-500'
+            }
     return (
       <article
         key={project.id}
@@ -245,14 +264,15 @@ export default function Home() {
             {project.location ? ` · ${project.location}` : ''}
           </span>
           {canCreateProjects ? (
-            <label onClick={event => event.stopPropagation()} className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-slate-600 dark:text-slate-300">
+            <label onClick={event => event.stopPropagation()} className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${statusColors.badge}`}>
               <span className="sr-only">Status</span>
+              <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusColors.dot}`} />
               <select
                 value={status}
                 disabled={savingStatusProjectId === project.id}
                 onChange={event => void handleProjectStatusChange(project.id, event.target.value)}
                 aria-label={`Status for ${project.name}`}
-                className="rounded-md border border-slate-200 bg-white px-1.5 py-1 text-[10px] capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                className="max-w-24 cursor-pointer bg-transparent text-[10px] capitalize focus-visible:outline-none disabled:cursor-wait disabled:opacity-60"
               >
                 {!knownStatuses.includes(status) && <option value={status}>{project.status}</option>}
                 <option value="awarded">Awarded</option>
@@ -266,12 +286,13 @@ export default function Home() {
               )}
             </label>
           ) : (
-            <span className="shrink-0 rounded-md bg-slate-100 px-2 py-1 text-[10px] capitalize leading-4 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+            <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-semibold capitalize leading-4 ${statusColors.badge}`}>
+              <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${statusColors.dot}`} />
               {project.status || 'bidding'}
             </span>
           )}
         </div>
-        <div aria-label={`Project snapshot: ${project.invoice_count ?? 'unavailable'} posted invoices, ${project.rfq_count ?? 'unavailable'} RFQs, budget ${fullCurrency(project.material_budget)}, expenses ${fullCurrency(project.expenses)}`} className="mt-1.5 grid grid-cols-4 gap-1 border-t border-slate-100 pt-1.5 dark:border-slate-800">
+        <div aria-label={`Project snapshot: ${project.invoice_count ?? 'unavailable'} posted invoices, ${project.rfq_count ?? 'unavailable'} RFQs, budget ${fullCurrency(project.material_budget)}, expenses ${fullCurrency(project.expenses)}`} className="mt-1.5 grid grid-cols-4 gap-1 rounded-lg border border-blue-100 bg-blue-50/70 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-800/70">
           {[
             { label: 'Invoices', value: project.invoice_count == null ? '—' : String(project.invoice_count), title: 'Posted invoices' },
             { label: 'RFQs', value: project.rfq_count == null ? '—' : String(project.rfq_count), title: 'RFQ history entries' },
