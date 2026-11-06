@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
+import { loginToAuthEmail } from '@/lib/usernames'
 
 export const APP_ROLES = ['ADMIN', 'RFQ_MANAGER', 'REVIEWER', 'COST_EDITOR', 'VIEWER'] as const
 export type AppRole = (typeof APP_ROLES)[number]
@@ -13,7 +14,7 @@ interface AuthContextValue {
   loading: boolean
   rolesLoading: boolean
   error: string | null
-  signIn: (email: string, password: string) => Promise<string | null>
+  signIn: (usernameOrEmail: string, password: string) => Promise<string | null>
   signOut: () => Promise<string | null>
 }
 
@@ -78,8 +79,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  async function signIn(email: string, password: string) {
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+  async function signIn(usernameOrEmail: string, password: string) {
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: loginToAuthEmail(usernameOrEmail),
+      password
+    })
     return signInError?.message ?? null
   }
 
