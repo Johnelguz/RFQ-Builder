@@ -40,6 +40,7 @@ interface SavedRfqWorkflow {
   showRfqWizard: boolean
   wizardStep: 'PROJECT_NAME' | 'SUPPLIER_LIST'
   dispatchedSupplierIds: string[]
+  rfqName?: string
 }
 
 interface SavedTakeoffDraft {
@@ -79,6 +80,7 @@ function isSavedRfqWorkflow(value: unknown): value is SavedRfqWorkflow {
     && 'dispatchedSupplierIds' in value
     && Array.isArray(value.dispatchedSupplierIds)
     && value.dispatchedSupplierIds.every(id => typeof id === 'string')
+    && (!('rfqName' in value) || typeof value.rfqName === 'string')
 }
 
 function isSavedTakeoffDraft(value: unknown): value is SavedTakeoffDraft {
@@ -130,6 +132,7 @@ function TakeoffDashboard() {
   const [showCatalogModal, setShowCatalogModal] = useState<boolean>(false)
   const [showRfqWizard, setShowRfqWizard] = useState<boolean>(false)
   const [wizardStep, setWizardStep] = useState<'PROJECT_NAME' | 'SUPPLIER_LIST'>('PROJECT_NAME')
+  const [rfqName, setRfqName] = useState('')
   const handledDashboardRfqProjectId = useRef<string | null>(null)
   const [restoredRfqWorkflowProjectId, setRestoredRfqWorkflowProjectId] = useState<string | null>(null)
   const rfqWorkflowStorageKey = `rfq-workflow:v1:${user?.id || 'anonymous'}:${projectId}`
@@ -216,7 +219,8 @@ function TakeoffDashboard() {
             alert('The saved RFQ dispatch session was invalid and has been cleared.')
           } else {
             setShowRfqWizard(workflow.showRfqWizard)
-            setWizardStep(workflow.wizardStep)
+            setRfqName(workflow.rfqName || '')
+            setWizardStep(workflow.rfqName ? workflow.wizardStep : 'PROJECT_NAME')
             setDispatchedSupplierIds(workflow.dispatchedSupplierIds)
           }
         }
@@ -240,7 +244,8 @@ function TakeoffDashboard() {
         version: 1,
         showRfqWizard,
         wizardStep,
-        dispatchedSupplierIds
+        dispatchedSupplierIds,
+        rfqName
       }
       window.sessionStorage.setItem(rfqWorkflowStorageKey, JSON.stringify(workflow))
     } catch (saveError) {
@@ -251,6 +256,7 @@ function TakeoffDashboard() {
     projectId,
     restoredRfqWorkflowProjectId,
     rfqWorkflowStorageKey,
+    rfqName,
     showRfqWizard,
     wizardStep
   ])
@@ -472,9 +478,11 @@ function TakeoffDashboard() {
       alert('Please add at least one material line item before generating an RFQ.')
       return
     }
-    setWizardStep(dispatchedSupplierIds.length > 0 ? 'SUPPLIER_LIST' : 'PROJECT_NAME')
+    setRfqName('')
+    setDispatchedSupplierIds([])
+    setWizardStep('PROJECT_NAME')
     setShowRfqWizard(true)
-  }, [dispatchedSupplierIds.length, materials.length])
+  }, [materials.length])
 
   function closeRfqWizard(clearDispatchHistory = false) {
     setShowRfqWizard(false)
@@ -488,7 +496,8 @@ function TakeoffDashboard() {
           version: 1,
           showRfqWizard: false,
           wizardStep,
-          dispatchedSupplierIds
+          dispatchedSupplierIds,
+          rfqName
         } satisfies SavedRfqWorkflow))
       }
     } catch (storageError) {
@@ -548,17 +557,16 @@ function TakeoffDashboard() {
 
   async function handleProceedToSuppliers(e: React.FormEvent) {
     e.preventDefault()
-    if (!projectName.trim()) {
-      alert('Please enter a project name.')
+    if (!rfqName.trim()) {
+      alert('Please enter an RFQ name.')
       return
     }
-    await supabase.from('projects').upsert([{ id: projectId, name: projectName.trim() }])
     setWizardStep('SUPPLIER_LIST')
   }
 
   function getEmailBodyText(sup: Supplier) {
     const greeting = sup.contact_name?.trim() ? `Hello ${sup.contact_name},` : `Hello ${sup.company_name} Team,`
-    let body = `${greeting}\n\nPlease provide pricing and availability for the following material package (${projectName}):\n\n`
+    let body = `${greeting}\n\nPlease provide pricing and availability for the following material package (${rfqName.trim()} — ${projectName}):\n\n`
     materials.forEach(item => {
       const isWireOrder = item.description.trimStart().toUpperCase().startsWith('WIRE,')
       body += `• Item #${item.item_number}: ${item.quantity} ${item.unit} - ${item.description}`
@@ -572,7 +580,13 @@ function TakeoffDashboard() {
   }
 
   async function handleOpenSupplierGmail(sup: Supplier) {
-    const subjectLine = `RFQ for ${projectName.trim()}`
+    const trimmedRfqName = rfqName.trim()
+    if (!trimmedRfqName) {
+      alert('Please enter an RFQ name before opening a supplier draft.')
+      setWizardStep('PROJECT_NAME')
+      return
+    }
+    const subjectLine = `RFQ for ${trimmedRfqName}`
     const { data: batch } = await supabase.from('rfq_batches').insert([{ project_id: projectId, supplier_id: sup.id, subject: subjectLine, status: 'DRAFT' }]).select().single()
 
     if (batch) {
@@ -589,7 +603,8 @@ function TakeoffDashboard() {
         version: 1,
         showRfqWizard: true,
         wizardStep: 'SUPPLIER_LIST',
-        dispatchedSupplierIds: nextDispatchedSupplierIds
+        dispatchedSupplierIds: nextDispatchedSupplierIds,
+        rfqName
       } satisfies SavedRfqWorkflow))
     } catch (storageError) {
       alert(`Unable to preserve which vendor drafts were opened: ${storageError instanceof Error ? storageError.message : 'Browser storage is unavailable.'}`)
@@ -988,16 +1003,17 @@ function TakeoffDashboard() {
             {wizardStep === 'PROJECT_NAME' && (
               <div>
                 <div className="flex justify-between items-center mb-4 pb-2 border-b">
-                  <h2 className="text-lg font-bold text-gray-800">Step 1: Set Job / Project Name</h2>
+                  <h2 className="text-lg font-bold text-gray-800">Step 1: Name This RFQ</h2>
                   <button onClick={() => closeRfqWizard()} className="text-gray-400 font-bold text-lg">✕</button>
                 </div>
                 <form onSubmit={handleProceedToSuppliers} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">Project Name</label>
-                    <input type="text" required value={projectName} onChange={e => setProjectName(e.target.value)} className="w-full p-3 border rounded-lg text-base font-semibold bg-gray-50" autoFocus />
+                    <label htmlFor="rfq-name" className="block text-xs font-semibold text-gray-700 mb-1">RFQ Name</label>
+                    <input id="rfq-name" type="text" required value={rfqName} onChange={e => setRfqName(e.target.value)} placeholder="e.g. Lighting Package - Building A" className="w-full p-3 border rounded-lg text-base font-semibold bg-gray-50" autoFocus />
                   </div>
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
-                    <strong>Subject Line:</strong> <span className="font-mono">RFQ for {projectName.trim() || '[Project Name]'}</span>
+                    <strong>Subject Line:</strong> <span className="font-mono">RFQ for {rfqName.trim() || '[RFQ Name]'}</span>
+                    <p className="mt-1">Project: {projectName || 'Loading…'}</p>
                   </div>
                   <div className="flex justify-end gap-3 pt-2">
                     <button type="button" onClick={() => closeRfqWizard()} className="px-4 py-2 rounded text-sm bg-gray-100">Cancel</button>
@@ -1012,7 +1028,7 @@ function TakeoffDashboard() {
                 <div className="flex justify-between items-center mb-4 pb-2 border-b">
                   <div>
                     <h2 className="text-lg font-bold text-gray-800">Step 2: Dispatch RFQs to Vendors</h2>
-                    <p className="text-xs text-gray-500">Job: <span className="text-blue-600">{projectName}</span></p>
+                    <p className="text-xs text-gray-500">RFQ: <span className="text-blue-600">{rfqName}</span> · Project: {projectName}</p>
                   </div>
                   <button onClick={() => closeRfqWizard()} className="text-gray-400 font-bold text-lg">✕</button>
                 </div>
