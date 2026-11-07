@@ -456,13 +456,21 @@ function TakeoffDashboard() {
   }
 
   async function handleDeleteMaterial(materialId: string) {
-    await supabase.from('materials').delete().eq('id', materialId)
+    const { error } = await supabase.from('materials').delete().eq('id', materialId)
+    if (error) {
+      alert(`Unable to delete the takeoff item: ${error.message}`)
+      return
+    }
     setMaterials(prev => prev.filter(m => m.id !== materialId))
   }
 
   async function handleClearAllMaterials() {
     if (!confirm('Are you sure you want to clear all items from this project takeoff?')) return
-    await supabase.from('materials').delete().eq('project_id', projectId)
+    const { error } = await supabase.from('materials').delete().eq('project_id', projectId)
+    if (error) {
+      alert(`Unable to clear the project takeoff: ${error.message}`)
+      return
+    }
     setMaterials([])
     closeRfqWizard(true)
   }
@@ -587,11 +595,35 @@ function TakeoffDashboard() {
       return
     }
     const subjectLine = `RFQ for ${trimmedRfqName}`
-    const { data: batch } = await supabase.from('rfq_batches').insert([{ project_id: projectId, supplier_id: sup.id, subject: subjectLine, status: 'DRAFT' }]).select().single()
+    const { data: batch, error: batchError } = await supabase
+      .from('rfq_batches')
+      .insert([{ project_id: projectId, supplier_id: sup.id, subject: subjectLine, status: 'DRAFT' }])
+      .select()
+      .single()
 
-    if (batch) {
-      const rfqLineItems = materials.map(item => ({ rfq_batch_id: batch.id, material_id: item.id }))
-      await supabase.from('rfq_line_items').insert(rfqLineItems)
+    if (batchError || !batch) {
+      alert(`Unable to save this RFQ to history: ${batchError?.message || 'The RFQ record was not created.'}`)
+      return
+    }
+
+    const rfqLineItems = materials.map(item => ({
+      rfq_batch_id: batch.id,
+      material_id: item.id,
+      snapshot_item_number: item.item_number,
+      snapshot_quantity: item.quantity,
+      snapshot_unit: item.unit,
+      snapshot_description: item.description,
+      snapshot_manufacturer: item.manufacturer,
+      snapshot_model_number: item.model_number,
+      snapshot_sheet_reference: item.sheet_reference,
+      snapshot_notes: item.notes
+    }))
+    const { error: lineItemsError } = await supabase.from('rfq_line_items').insert(rfqLineItems)
+    if (lineItemsError) {
+      const { error: cleanupError } = await supabase.from('rfq_batches').delete().eq('id', batch.id)
+      const cleanupMessage = cleanupError ? ` The incomplete history record could not be removed: ${cleanupError.message}` : ''
+      alert(`Unable to save RFQ line items to history: ${lineItemsError.message}.${cleanupMessage}`)
+      return
     }
 
     const nextDispatchedSupplierIds = dispatchedSupplierIds.includes(sup.id)
@@ -622,7 +654,11 @@ function TakeoffDashboard() {
 
   async function handleResetTakeoffAndClose() {
     if (confirm('Clear entire takeoff list and start fresh?')) {
-      await supabase.from('materials').delete().eq('project_id', projectId)
+      const { error } = await supabase.from('materials').delete().eq('project_id', projectId)
+      if (error) {
+        alert(`Unable to clear the project takeoff: ${error.message}`)
+        return
+      }
       setMaterials([])
       closeRfqWizard(true)
     }

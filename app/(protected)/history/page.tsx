@@ -21,16 +21,14 @@ interface RFQHistoryItem {
     email: string
   }
   rfq_line_items?: {
-    materials?: {
-      item_number: number
-      quantity: number
-      unit: string
-      description: string
-      manufacturer: string
-      model_number: string
-      sheet_reference: string
-      notes: string
-    }
+    snapshot_item_number: number | null
+    snapshot_quantity: number | null
+    snapshot_unit: string | null
+    snapshot_description: string | null
+    snapshot_manufacturer: string | null
+    snapshot_model_number: string | null
+    snapshot_sheet_reference: string | null
+    snapshot_notes: string | null
   }[]
 }
 
@@ -53,7 +51,7 @@ export default function RFQHistoryPage() {
         const supplierEmail = batch.suppliers?.email || ''
         const dispatchDate = new Date(batch.created_at).toLocaleString()
         const hasMatchingDescription = batch.rfq_line_items?.some(lineItem =>
-          [lineItem.materials?.description, lineItem.materials?.manufacturer, lineItem.materials?.model_number]
+          [lineItem.snapshot_description, lineItem.snapshot_manufacturer, lineItem.snapshot_model_number]
             .some(value => value?.toLowerCase().includes(normalizedSearchQuery))
         )
         return projectName.toLowerCase().includes(normalizedSearchQuery)
@@ -79,16 +77,14 @@ export default function RFQHistoryPage() {
         projects ( name ),
         suppliers ( company_name, contact_name, email ),
         rfq_line_items (
-          materials (
-            item_number,
-            quantity,
-            unit,
-            description,
-            manufacturer,
-            model_number,
-            sheet_reference,
-            notes
-          )
+          snapshot_item_number,
+          snapshot_quantity,
+          snapshot_unit,
+          snapshot_description,
+          snapshot_manufacturer,
+          snapshot_model_number,
+          snapshot_sheet_reference,
+          snapshot_notes
         )
       `)
     if (projectId) query = query.eq('project_id', projectId)
@@ -125,9 +121,9 @@ export default function RFQHistoryPage() {
     if (!confirm(`Load all items from "${batch.projects?.name || 'this order'}" into the active takeoff? This will add them to the project list.`)) return
 
     // Extract materials from the batch line items
-    const materialsToAdd = batch.rfq_line_items
-      ?.map(li => li.materials)
-      .filter(Boolean)
+    const materialsToAdd = batch.rfq_line_items?.filter(
+      lineItem => lineItem.snapshot_description && lineItem.snapshot_quantity != null
+    )
 
     if (!materialsToAdd || materialsToAdd.length === 0) {
       alert('No itemized materials found in this history record.')
@@ -136,17 +132,16 @@ export default function RFQHistoryPage() {
 
     // Insert items into the project's active materials table
     let successCount = 0
-    for (const mat of materialsToAdd) {
-      if (!mat) continue
+    for (const item of materialsToAdd) {
       const { error } = await supabase.from('materials').insert([{
         project_id: batch.project_id,
-        quantity: mat.quantity,
-        unit: mat.unit || 'EA',
-        description: mat.description,
-        manufacturer: mat.manufacturer || '',
-        model_number: mat.model_number || '',
-        sheet_reference: mat.sheet_reference || '',
-        notes: mat.notes || '',
+        quantity: item.snapshot_quantity,
+        unit: item.snapshot_unit || 'EA',
+        description: item.snapshot_description,
+        manufacturer: item.snapshot_manufacturer || '',
+        model_number: item.snapshot_model_number || '',
+        sheet_reference: item.snapshot_sheet_reference || '',
+        notes: item.snapshot_notes || '',
         item_number: successCount + 1
       }])
       if (!error) successCount++
@@ -316,15 +311,13 @@ export default function RFQHistoryPage() {
                       </thead>
                       <tbody className="divide-y">
                         {batch.rfq_line_items?.map((li, idx) => {
-                          const mat = li.materials
-                          if (!mat) return null
                           return (
                             <tr key={idx} className="hover:bg-white">
-                              <td className="p-2 text-gray-500">{mat.item_number}</td>
-                              <td className="p-2 font-semibold">{mat.quantity} {mat.unit}</td>
-                              <td className="p-2 text-gray-800">{mat.description}</td>
-                              <td className="p-2 text-gray-600">{mat.manufacturer} <span className="font-mono bg-white px-1 border rounded">{mat.model_number}</span></td>
-                              <td className="p-2 text-blue-600 font-medium">{mat.sheet_reference || '—'}</td>
+                              <td className="p-2 text-gray-500">{li.snapshot_item_number}</td>
+                              <td className="p-2 font-semibold">{li.snapshot_quantity} {li.snapshot_unit}</td>
+                              <td className="p-2 text-gray-800">{li.snapshot_description}</td>
+                              <td className="p-2 text-gray-600">{li.snapshot_manufacturer} <span className="font-mono bg-white px-1 border rounded">{li.snapshot_model_number}</span></td>
+                              <td className="p-2 text-blue-600 font-medium">{li.snapshot_sheet_reference || '—'}</td>
                             </tr>
                           )
                         })}
