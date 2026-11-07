@@ -67,6 +67,12 @@ Open a project and choose **Material Costs** to set its budget, upload a PDF or 
 
 For local extraction testing, link the workspace to its Vercel project and run `vercel env pull` to retrieve local development variables, including Vercel's OIDC token. The Google identity condition above intentionally permits only the production environment; use a separate restricted identity binding if local or preview extraction is needed.
 
+## Submittal tracking
+
+After the authentication migration is active, apply [`supabase/migrations/20261107170000_submittals_core.sql`](./supabase/migrations/20261107170000_submittals_core.sql) in the Supabase SQL Editor. It creates project submittals, revision records, and append-only activity history. Open a project and choose **Submittals** to create and track Rev 0, record manual sends and responses, create or void revisions, and review the activity log. Submittal status is derived from its revisions; names and item numbers are unique within each project.
+
+The current phase supports manual send tracking only. Drive documents, Gmail draft confirmation, follow-ups, RFIs, and import/export are planned for later phases. No Gmail scopes are used by the current RFQ compose-URL feature.
+
 ## Roles
 
 Roles can be combined:
@@ -74,8 +80,8 @@ Roles can be combined:
 | Role | Access |
 | --- | --- |
 | Admin | Manage all app data, invite users, and assign roles |
-| RFQ Manager | Create projects, edit material takeoffs, manage suppliers, and create/manage RFQs |
-| Reviewer | View project takeoffs, RFQ history, and vendor quote comparisons |
+| RFQ Manager | Create projects, edit material takeoffs, manage suppliers, and create/manage RFQs and submittals |
+| Reviewer | View project takeoffs, RFQ history, submittals, and vendor quote comparisons |
 | Cost Editor | View all data; set manual material budgets, record invoices, and void invoices |
 | Viewer | Read-only access to project, RFQ, quote, budget, and invoice data |
 
@@ -89,4 +95,4 @@ Install dependencies and configure the Supabase environment variables, then run:
 npm run dev
 ```
 
-Use `npm run lint` and `npx tsc --noEmit` to validate changes.
+Use `npm run lint`, `npm test`, and `npx tsc --noEmit` to validate changes.

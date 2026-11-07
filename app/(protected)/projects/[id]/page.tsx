@@ -723,6 +723,7 @@ function TakeoffDashboard() {
             <Link href="/" className="text-xs text-blue-600 hover:underline font-semibold">← Dashboard</Link>
             <Link href={`/projects/${projectId}/quotes`} className="text-xs text-blue-600 hover:underline font-semibold">💲 Vendor Quotes</Link>
             <Link href={`/projects/${projectId}/costs`} className="text-xs text-blue-600 hover:underline font-semibold">📊 Material Costs</Link>
+            <Link href={`/projects/${projectId}/submittals`} className="text-xs text-blue-600 hover:underline font-semibold">📋 Submittals</Link>
             <Link href="/suppliers" className="text-xs text-blue-600 hover:underline font-semibold">⚙️ Suppliers</Link>
             <Link href={`/history?projectId=${projectId}`} className="text-xs text-blue-600 hover:underline font-semibold">📁 Project RFQ History</Link>
           </div>
