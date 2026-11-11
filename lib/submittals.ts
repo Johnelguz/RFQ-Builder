@@ -58,6 +58,7 @@ export interface SubmittalRevision {
   gmail_draft_id: string | null
   draft_subject: string | null
   draft_type: 'Initial' | 'Resubmittal' | 'Follow-up' | null
+  submittal_documents?: SubmittalDocument[]
   created_at: string
   updated_at: string
 }
@@ -88,6 +89,18 @@ export interface SubmittalActivity {
   description: string
   created_by: string | null
   timestamp: string
+}
+
+export interface SubmittalDocument {
+  id: string
+  revision_id: string
+  drive_file_id: string
+  drive_url: string
+  file_name: string
+  mime_type: string | null
+  label: string | null
+  created_by: string | null
+  created_at: string
 }
 
 export interface NextRevisionDraft {

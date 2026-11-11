@@ -71,7 +71,18 @@ For local extraction testing, link the workspace to its Vercel project and run `
 
 After the authentication migration is active, apply [`supabase/migrations/20261107170000_submittals_core.sql`](./supabase/migrations/20261107170000_submittals_core.sql) in the Supabase SQL Editor. It creates project submittals, revision records, and append-only activity history. Open a project and choose **Submittals** to create and track Rev 0, record manual sends and responses, create or void revisions, and review the activity log. Submittal status is derived from its revisions; names and item numbers are unique within each project.
 
-The current phase supports manual send tracking only. Drive documents, Gmail draft confirmation, follow-ups, RFIs, and import/export are planned for later phases. No Gmail scopes are used by the current RFQ compose-URL feature.
+After the core submittal migration, apply [`supabase/migrations/20261107173000_submittal_drive_documents.sql`](./supabase/migrations/20261107173000_submittal_drive_documents.sql). It adds project Drive-folder links and revision-specific document references. Documents remain in Google Drive; the app stores links and metadata only. In each submittal's **Documents** tab, attach files using the Picker or paste a Drive file URL. Links are grouped by revision, and each file can be previewed or opened in Drive.
+
+To enable Google Drive Picker, enable the Google Picker API in a Google Cloud project, create a browser API key restricted to your deployed app's HTTP referrers and the Picker API, and create a Web OAuth client with your app's origins configured. Add these public client identifiers to local development and the production app environment:
+
+| Variable | Value |
+| --- | --- |
+| `NEXT_PUBLIC_GOOGLE_PICKER_API_KEY` | Referrer-restricted Google API key |
+| `NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID` | Google OAuth Web client ID |
+
+Picker requests only the `drive.file` scope, which grants the app access to files the user selects for this app. No file contents are uploaded or stored by the app. If Picker is not configured, manually pasting a Drive URL remains available.
+
+The current submittal phase supports manual send tracking and Drive document links. Gmail draft confirmation, follow-ups, RFIs, and import/export remain planned for later phases. The existing RFQ compose-URL feature does not use Gmail scopes.
 
 ## Roles
 

@@ -4,7 +4,17 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { hasAnyRole, useAuth } from '@/lib/auth-context'
+import { GoogleDrivePickerButton } from '@/components/google-drive-picker'
 import { supabase } from '@/lib/supabase'
+import {
+  driveFileUrl,
+  driveFolderUrl,
+  drivePreviewUrl,
+  isDrivePreviewable,
+  parseDriveFileUrl,
+  parseDriveFolderUrl,
+  type DriveFileReference
+} from '@/lib/google-drive'
 import {
   addBusinessDays,
   BALL_IN_COURT_OPTIONS,
@@ -19,11 +29,12 @@ import {
   type RevisionStatus,
   type Submittal,
   type SubmittalActivity,
+  type SubmittalDocument,
   type SubmittalOverallStatus,
   type SubmittalType
 } from '@/lib/submittals'
 
-type DetailTab = 'Overview' | 'Revisions' | 'Notes / History'
+type DetailTab = 'Overview' | 'Revisions' | 'Documents' | 'Notes / History'
 
 interface OverviewForm {
   name: string
@@ -87,6 +98,9 @@ export default function SubmittalDetailPage() {
   const { roles, user } = useAuth()
   const canManage = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
   const [projectName, setProjectName] = useState('')
+  const [projectDriveFolderUrl, setProjectDriveFolderUrl] = useState<string | null>(null)
+  const [folderUrlDraft, setFolderUrlDraft] = useState('')
+  const [editingFolderUrl, setEditingFolderUrl] = useState(false)
   const [submittal, setSubmittal] = useState<Submittal | null>(null)
   const [activities, setActivities] = useState<SubmittalActivity[]>([])
   const [overview, setOverview] = useState<OverviewForm | null>(null)
@@ -104,16 +118,23 @@ export default function SubmittalDetailPage() {
   const [reviewerComments, setReviewerComments] = useState('')
   const [createNextRevision, setCreateNextRevision] = useState(false)
   const [note, setNote] = useState('')
+  const [manualRevisionId, setManualRevisionId] = useState<string | null>(null)
+  const [manualDriveUrl, setManualDriveUrl] = useState('')
+  const [manualFileName, setManualFileName] = useState('')
+  const [manualMimeType, setManualMimeType] = useState('')
+  const [manualLabel, setManualLabel] = useState('')
+  const [previewDocument, setPreviewDocument] = useState<SubmittalDocument | null>(null)
+  const [previewFailed, setPreviewFailed] = useState(false)
 
   const fetchData = useCallback(async () => {
     if (!projectId || !submittalId) return
     setLoading(true)
     setError(null)
     const [projectResult, submittalResult, activityResult] = await Promise.all([
-      supabase.from('projects').select('name').eq('id', projectId).single(),
+      supabase.from('projects').select('name, drive_folder_url').eq('id', projectId).single(),
       supabase
         .from('submittals')
-        .select('*, submittal_revisions(*)')
+        .select('*, submittal_revisions(*, submittal_documents(*))')
         .eq('id', submittalId)
         .eq('project_id', projectId)
         .single(),
@@ -125,7 +146,11 @@ export default function SubmittalDetailPage() {
     ])
 
     if (projectResult.error) setError(`Unable to load project: ${projectResult.error.message}`)
-    else setProjectName(projectResult.data.name)
+    else {
+      setProjectName(projectResult.data.name)
+      setProjectDriveFolderUrl(projectResult.data.drive_folder_url)
+      setFolderUrlDraft(projectResult.data.drive_folder_url || '')
+    }
 
     if (submittalResult.error) {
       setError(current => [current, `Unable to load submittal: ${submittalResult.error.message}`].filter(Boolean).join(' '))
@@ -191,7 +216,8 @@ export default function SubmittalDetailPage() {
       setError('Enter the date this revision was sent.')
       return
     }
-    if (!window.confirm('No linked Drive documents are tracked yet. You can continue and record this revision as sent. Continue?')) return
+    if (!latest.submittal_documents?.length
+      && !window.confirm('No linked Drive documents are attached to this revision. Continue and record it as sent anyway?')) return
     setSaving(true)
     setError(null)
     let nextFollowupDate: string
@@ -304,6 +330,115 @@ export default function SubmittalDetailPage() {
     setSaving(false)
   }
 
+  async function handleSaveProjectFolder(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const trimmedUrl = folderUrlDraft.trim()
+    if (!trimmedUrl) {
+      setSaving(true)
+      setError(null)
+      const { data, error: clearError } = await supabase.from('projects')
+        .update({ drive_folder_url: null })
+        .eq('id', projectId)
+        .select('id')
+        .single()
+      if (clearError || !data) setError(`Unable to clear project Drive folder link: ${clearError?.message || 'Project was not updated.'}`)
+      else {
+        setProjectDriveFolderUrl(null)
+        setEditingFolderUrl(false)
+        setNotice('Project Drive folder link cleared.')
+      }
+      setSaving(false)
+      return
+    }
+
+    const folderId = parseDriveFolderUrl(trimmedUrl)
+    if (!folderId) {
+      setError('Enter a valid Google Drive folder URL.')
+      return
+    }
+    setSaving(true)
+    setError(null)
+    const canonicalUrl = driveFolderUrl(folderId)
+    const { data, error: folderError } = await supabase.from('projects')
+      .update({ drive_folder_url: canonicalUrl })
+      .eq('id', projectId)
+      .select('id')
+      .single()
+    if (folderError || !data) setError(`Unable to save project Drive folder link: ${folderError?.message || 'Project was not updated.'}`)
+    else {
+      setProjectDriveFolderUrl(canonicalUrl)
+      setFolderUrlDraft(canonicalUrl)
+      setEditingFolderUrl(false)
+      setNotice('Project Drive folder link saved.')
+    }
+    setSaving(false)
+  }
+
+  async function handleAttachDocument(revisionId: string, file: DriveFileReference, label = '') {
+    setSaving(true)
+    setError(null)
+    const { error: attachError } = await supabase.rpc('attach_submittal_document', {
+      p_revision_id: revisionId,
+      p_drive_file_id: file.id,
+      p_drive_url: file.url,
+      p_file_name: file.name,
+      p_mime_type: file.mimeType,
+      p_label: label
+    })
+    if (attachError) {
+      setError(`Unable to attach Drive document: ${attachError.message}`)
+      setSaving(false)
+      throw new Error(attachError.message)
+    }
+    setNotice(`Attached "${file.name}" to this revision.`)
+    await fetchData()
+    setSaving(false)
+  }
+
+  async function handleManualDocumentSubmit(event: React.FormEvent<HTMLFormElement>, revisionId: string) {
+    event.preventDefault()
+    const fileId = parseDriveFileUrl(manualDriveUrl)
+    if (!fileId) {
+      setError('Enter a valid Google Drive file URL.')
+      return
+    }
+    const fileName = manualFileName.trim()
+    if (!fileName) {
+      setError('Enter a name for this Drive document.')
+      return
+    }
+    try {
+      await handleAttachDocument(revisionId, {
+        id: fileId,
+        name: fileName,
+        mimeType: manualMimeType.trim() || null,
+        url: driveFileUrl(fileId)
+      }, manualLabel)
+      setManualDriveUrl('')
+      setManualFileName('')
+      setManualMimeType('')
+      setManualLabel('')
+      setManualRevisionId(null)
+    } catch {
+      return
+    }
+  }
+
+  async function handleDetachDocument(document: SubmittalDocument) {
+    if (!window.confirm(`Remove "${document.file_name}" from this revision? The file itself will remain in Google Drive.`)) return
+    setSaving(true)
+    setError(null)
+    const { error: detachError } = await supabase.rpc('detach_submittal_document', {
+      p_document_id: document.id
+    })
+    if (detachError) setError(`Unable to remove Drive link: ${detachError.message}`)
+    else {
+      setNotice(`Removed "${document.file_name}" from this revision.`)
+      await fetchData()
+    }
+    setSaving(false)
+  }
+
   if (loading) return <main className="mx-auto max-w-5xl p-6 text-sm text-gray-500">Loading submittal…</main>
   if (!submittal) {
     return (
@@ -344,13 +479,37 @@ export default function SubmittalDetailPage() {
           <div><div className="text-xs text-gray-500">Needed By</div><div className="font-semibold">{formatDateForDisplay(submittal.required_by_date)}</div></div>
           <div><div className="text-xs text-gray-500">Next Follow-up</div><div className="font-semibold">{formatDateForDisplay(latest?.next_followup_date || null)}</div></div>
         </div>
+        <div className="mt-4 border-t pt-3">
+          {editingFolderUrl && canManage ? (
+            <form onSubmit={handleSaveProjectFolder} className="flex flex-col gap-2 sm:flex-row">
+              <label htmlFor="project-drive-folder" className="sr-only">Project Google Drive folder URL</label>
+              <input
+                id="project-drive-folder"
+                type="url"
+                value={folderUrlDraft}
+                onChange={event => setFolderUrlDraft(event.target.value)}
+                placeholder="https://drive.google.com/drive/folders/…"
+                className="min-w-0 flex-1 rounded border p-2 text-sm"
+              />
+              <button disabled={saving} className="rounded bg-blue-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Save folder link</button>
+              <button type="button" onClick={() => { setEditingFolderUrl(false); setFolderUrlDraft(projectDriveFolderUrl || '') }} className="rounded border px-3 py-2 text-xs font-semibold text-gray-700">Cancel</button>
+            </form>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              {projectDriveFolderUrl
+                ? <a href={projectDriveFolderUrl} target="_blank" rel="noreferrer" className="font-semibold text-blue-700 hover:underline">Open project Drive folder ↗</a>
+                : <span className="text-gray-500">No project Drive folder linked.</span>}
+              {canManage && <button type="button" onClick={() => { setFolderUrlDraft(projectDriveFolderUrl || ''); setEditingFolderUrl(true) }} className="text-xs font-semibold text-blue-700 hover:underline">{projectDriveFolderUrl ? 'Edit folder link' : 'Add folder link'}</button>}
+            </div>
+          )}
+        </div>
       </header>
 
       {error && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
       {notice && <p role="status" className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
 
       <div className="mb-4 flex flex-wrap gap-2 border-b" role="tablist" aria-label="Submittal detail sections">
-        {(['Overview', 'Revisions', 'Notes / History'] as const).map(tab => (
+        {(['Overview', 'Revisions', 'Documents', 'Notes / History'] as const).map(tab => (
           <button key={tab} type="button" role="tab" aria-selected={activeTab === tab} onClick={() => setActiveTab(tab)} className={`border-b-2 px-4 py-2 text-sm font-semibold ${activeTab === tab ? 'border-blue-700 text-blue-800' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
             {tab}
           </button>
@@ -427,6 +586,83 @@ export default function SubmittalDetailPage() {
         </section>
       )}
 
+      {activeTab === 'Documents' && (
+        <section className="space-y-4">
+          <p className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+            These are links to files in Google Drive, grouped by revision. The app does not upload, copy, or store file contents.
+          </p>
+          {sortedRevisions.map(revision => {
+            const documents = revision.submittal_documents || []
+            return (
+              <article key={revision.id} className="rounded-xl border bg-white p-4 shadow-sm sm:p-5">
+                <header className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-bold text-gray-900">Rev {revision.revision_number}</h2>
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${revisionStatusClass(revision.status)}`}>{revision.status}</span>
+                  </div>
+                  {canManage && revision.status !== 'Void' && (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <GoogleDrivePickerButton
+                        disabled={saving}
+                        onSelect={file => handleAttachDocument(revision.id, file)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => { setError(null); setManualRevisionId(current => current === revision.id ? null : revision.id) }}
+                        className="text-xs font-semibold text-blue-700 hover:underline"
+                      >
+                        Paste Drive link
+                      </button>
+                    </div>
+                  )}
+                </header>
+
+                {manualRevisionId === revision.id && canManage && (
+                  <form onSubmit={event => void handleManualDocumentSubmit(event, revision.id)} className="mt-4 grid gap-3 rounded-lg bg-gray-50 p-3 sm:grid-cols-2">
+                    <label className="text-xs font-semibold text-gray-700 sm:col-span-2">Google Drive file URL
+                      <input type="url" required value={manualDriveUrl} onChange={event => setManualDriveUrl(event.target.value)} placeholder="https://drive.google.com/file/d/…" className="mt-1 w-full rounded border bg-white p-2 text-sm" />
+                    </label>
+                    <label className="text-xs font-semibold text-gray-700">File name
+                      <input required value={manualFileName} onChange={event => setManualFileName(event.target.value)} className="mt-1 w-full rounded border bg-white p-2 text-sm" />
+                    </label>
+                    <label className="text-xs font-semibold text-gray-700">MIME type (optional)
+                      <input value={manualMimeType} onChange={event => setManualMimeType(event.target.value)} placeholder="application/pdf" className="mt-1 w-full rounded border bg-white p-2 text-sm" />
+                    </label>
+                    <label className="text-xs font-semibold text-gray-700 sm:col-span-2">Label (optional)
+                      <input value={manualLabel} onChange={event => setManualLabel(event.target.value)} placeholder="Marked-up set" className="mt-1 w-full rounded border bg-white p-2 text-sm" />
+                    </label>
+                    <div className="flex justify-end gap-2 sm:col-span-2">
+                      <button type="button" onClick={() => setManualRevisionId(null)} className="rounded border px-3 py-2 text-xs font-semibold text-gray-700">Cancel</button>
+                      <button disabled={saving} className="rounded bg-blue-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Attach link</button>
+                    </div>
+                  </form>
+                )}
+
+                <ul className="mt-3 divide-y">
+                  {documents.map(document => (
+                    <li key={document.id} className="flex flex-col justify-between gap-2 py-3 sm:flex-row sm:items-center">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-gray-900">{document.file_name}</div>
+                        <div className="mt-0.5 text-xs text-gray-500">
+                          {document.label && <span>{document.label} · </span>}
+                          {document.mime_type || 'Google Drive file'} · Added {new Date(document.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-3">
+                        <button type="button" onClick={() => { setPreviewDocument(document); setPreviewFailed(false) }} className="text-xs font-semibold text-blue-700 hover:underline">Preview</button>
+                        <a href={document.drive_url} target="_blank" rel="noreferrer" className="text-xs font-semibold text-blue-700 hover:underline">Open in Drive ↗</a>
+                        {canManage && <button disabled={saving} type="button" onClick={() => void handleDetachDocument(document)} className="text-xs font-semibold text-rose-700 hover:underline disabled:opacity-50">Remove link</button>}
+                      </div>
+                    </li>
+                  ))}
+                  {documents.length === 0 && <li className="py-5 text-center text-sm text-gray-500">No Drive documents attached to Rev {revision.revision_number}.</li>}
+                </ul>
+              </article>
+            )
+          })}
+        </section>
+      )}
+
       {activeTab === 'Notes / History' && (
         <section className="space-y-4">
           {canManage && (
@@ -498,6 +734,35 @@ export default function SubmittalDetailPage() {
               <button disabled={saving} className="rounded bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{saving ? 'Saving…' : 'Save Response'}</button>
             </div>
           </form>
+        </div>
+      )}
+
+      {previewDocument && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="drive-preview-title">
+          <section className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+            <header className="flex items-center justify-between gap-3 border-b p-4">
+              <div className="min-w-0">
+                <h2 id="drive-preview-title" className="truncate font-bold text-gray-900">{previewDocument.file_name}</h2>
+                {previewDocument.label && <p className="text-xs text-gray-500">{previewDocument.label}</p>}
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
+                <a href={previewDocument.drive_url} target="_blank" rel="noreferrer" className="text-xs font-semibold text-blue-700 hover:underline">Open in Drive ↗</a>
+                <button type="button" aria-label="Close preview" onClick={() => setPreviewDocument(null)} className="rounded border px-2.5 py-1.5 text-sm font-semibold text-gray-700">Close</button>
+              </div>
+            </header>
+            <div className="min-h-0 flex-1 bg-gray-100 p-3">
+              {previewFailed || !isDrivePreviewable(previewDocument.mime_type)
+                ? <p className="rounded-lg bg-white p-6 text-center text-sm text-gray-700">This file could not be previewed here. Open it in Google Drive to view it.</p>
+                : <iframe
+                    title={`Google Drive preview: ${previewDocument.file_name}`}
+                    src={drivePreviewUrl(previewDocument.drive_file_id)}
+                    onError={() => setPreviewFailed(true)}
+                    className="h-[65vh] min-h-72 w-full rounded border bg-white"
+                    allow="autoplay"
+                  />}
+              {!previewFailed && isDrivePreviewable(previewDocument.mime_type) && <p className="mt-2 text-center text-xs text-gray-600">If the preview is blank or unavailable, use “Open in Drive”. You must have access to the file in Google Drive.</p>}
+            </div>
+          </section>
         </div>
       )}
     </main>
