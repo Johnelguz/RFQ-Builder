@@ -45,7 +45,6 @@ interface GoogleDrivePickerApi {
 
 interface GoogleApi {
   load(api: string, options: { callback: () => void; onerror: () => void }): void
-  picker?: GoogleDrivePickerApi
 }
 
 interface GoogleIdentityApi {
@@ -59,6 +58,7 @@ interface GoogleIdentityApi {
       }): TokenClient
     }
   }
+  picker?: GoogleDrivePickerApi
 }
 
 declare global {
@@ -149,19 +149,20 @@ export function GoogleDrivePickerButton({
 
       const accessToken = await requestDriveToken(identity, clientId)
       await loadPickerApi(gapi)
-      if (!gapi.picker) throw new Error('Google Drive Picker is unavailable.')
+      const pickerApi = identity.picker
+      if (!pickerApi) throw new Error('Google Drive Picker is unavailable.')
 
       await new Promise<void>((resolve, reject) => {
-        const picker = new gapi.picker!.PickerBuilder()
-          .addView(new gapi.picker!.View('DOCS'))
+        const picker = new pickerApi.PickerBuilder()
+          .addView(new pickerApi.View('DOCS'))
           .setOAuthToken(accessToken)
           .setDeveloperKey(apiKey)
           .setCallback(response => {
-            if (response.action === gapi.picker!.Action.CANCEL) {
+            if (response.action === pickerApi.Action.CANCEL) {
               resolve()
               return
             }
-            if (response.action !== gapi.picker!.Action.PICKED) return
+            if (response.action !== pickerApi.Action.PICKED) return
             const selected = response.docs?.[0]
             if (!selected?.id || !selected.name) {
               reject(new Error('Google Drive did not return the selected file details.'))
