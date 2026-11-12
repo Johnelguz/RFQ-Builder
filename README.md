@@ -73,12 +73,13 @@ After the authentication migration is active, apply [`supabase/migrations/202611
 
 After the core submittal migration, apply [`supabase/migrations/20261107173000_submittal_drive_documents.sql`](./supabase/migrations/20261107173000_submittal_drive_documents.sql). It adds project Drive-folder links and revision-specific document references. Documents remain in Google Drive; the app stores links and metadata only. In each submittal's **Documents** tab, attach files using the Picker or paste a Drive file URL. Links are grouped by revision, and each file can be previewed or opened in Drive.
 
-To enable Google Drive Picker, enable the Google Picker API in a Google Cloud project, create a browser API key restricted to your deployed app's HTTP referrers and the Picker API, and create a Web OAuth client with your app's origins configured. Add these public client identifiers to local development and the production app environment:
+To enable Google Drive Picker, enable both the Google Picker API and Google Drive API in the same Google Cloud project as the Web OAuth client. Create a browser API key with website restrictions for your deployed app (for example, `https://your-app.example.com/*`) and `https://docs.google.com/*`; restrict it to both the Google Picker API and Google Drive API. Create a Web OAuth client with your app's origins configured. Add these public identifiers to local development and the production app environment:
 
 | Variable | Value |
 | --- | --- |
 | `NEXT_PUBLIC_GOOGLE_PICKER_API_KEY` | Referrer-restricted Google API key |
 | `NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID` | Google OAuth Web client ID |
+| `NEXT_PUBLIC_GOOGLE_CLOUD_PROJECT_NUMBER` | Numeric project number from the same Google Cloud project |
 
 Picker requests only the `drive.file` scope, which grants the app access to files the user selects for this app. No file contents are uploaded or stored by the app. If Picker is not configured, manually pasting a Drive URL remains available.
 

@@ -33,6 +33,7 @@ interface PickerBuilder {
   addView(view: unknown): PickerBuilder
   setOAuthToken(token: string): PickerBuilder
   setDeveloperKey(key: string): PickerBuilder
+  setAppId(appId: string): PickerBuilder
   setCallback(callback: (response: PickerResponse) => void): PickerBuilder
   build(): PickerInstance
 }
@@ -132,8 +133,9 @@ export function GoogleDrivePickerButton({
     setError(null)
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_PICKER_API_KEY
     const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID
-    if (!apiKey || !clientId) {
-      setError('Google Drive Picker is not configured. Set the public Picker API key and OAuth client ID.')
+    const appId = process.env.NEXT_PUBLIC_GOOGLE_CLOUD_PROJECT_NUMBER
+    if (!apiKey || !clientId || !appId) {
+      setError('Google Drive Picker is not configured. Set the public Picker API key, OAuth client ID, and Cloud project number.')
       return
     }
 
@@ -160,6 +162,7 @@ export function GoogleDrivePickerButton({
           .addView(new pickerApi.View('DOCS'))
           .setOAuthToken(accessToken)
           .setDeveloperKey(apiKey)
+          .setAppId(appId)
           .setCallback(response => {
             if (response.action === pickerApi.Action.CANCEL) {
               resolve()
