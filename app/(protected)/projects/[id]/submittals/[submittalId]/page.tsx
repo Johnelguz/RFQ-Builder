@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { hasAnyRole, useAuth } from '@/lib/auth-context'
+import { useFormDraftState } from '@/lib/form-drafts'
 import { supabase } from '@/lib/supabase'
 import {
   driveFileUrl,
@@ -98,30 +99,30 @@ export default function SubmittalDetailPage() {
   const canManage = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
   const [projectName, setProjectName] = useState('')
   const [projectDriveFolderUrl, setProjectDriveFolderUrl] = useState<string | null>(null)
-  const [folderUrlDraft, setFolderUrlDraft] = useState('')
-  const [editingFolderUrl, setEditingFolderUrl] = useState(false)
+  const [folderUrlDraft, setFolderUrlDraft, setFolderUrlDraftFromServer] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:folder-url`, '')
+  const [editingFolderUrl, setEditingFolderUrl] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:folder-edit-open`, false)
   const [submittal, setSubmittal] = useState<Submittal | null>(null)
   const [activities, setActivities] = useState<SubmittalActivity[]>([])
-  const [overview, setOverview] = useState<OverviewForm | null>(null)
+  const [overview, setOverview, setOverviewFromServer] = useFormDraftState<OverviewForm | null>(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:overview`, null)
   const [activeTab, setActiveTab] = useState<DetailTab>('Overview')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [showMarkSent, setShowMarkSent] = useState(false)
-  const [showResponse, setShowResponse] = useState(false)
-  const [sentDate, setSentDate] = useState(localDateString())
-  const [sentTo, setSentTo] = useState('')
-  const [responseStatus, setResponseStatus] = useState<RevisionStatus>('Approved')
-  const [responseDate, setResponseDate] = useState(localDateString())
-  const [reviewerComments, setReviewerComments] = useState('')
-  const [createNextRevision, setCreateNextRevision] = useState(false)
-  const [note, setNote] = useState('')
-  const [manualRevisionId, setManualRevisionId] = useState<string | null>(null)
-  const [manualDriveUrl, setManualDriveUrl] = useState('')
-  const [manualFileName, setManualFileName] = useState('')
-  const [manualMimeType, setManualMimeType] = useState('')
-  const [manualLabel, setManualLabel] = useState('')
+  const [showMarkSent, setShowMarkSent] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:mark-sent-open`, false)
+  const [showResponse, setShowResponse] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:response-open`, false)
+  const [sentDate, setSentDate] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:sent-date`, localDateString())
+  const [sentTo, setSentTo] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:sent-to`, '')
+  const [responseStatus, setResponseStatus] = useFormDraftState<RevisionStatus>(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:response-status`, 'Approved')
+  const [responseDate, setResponseDate] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:response-date`, localDateString())
+  const [reviewerComments, setReviewerComments] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:reviewer-comments`, '')
+  const [createNextRevision, setCreateNextRevision] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:create-next-revision`, false)
+  const [note, setNote] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:note`, '')
+  const [manualRevisionId, setManualRevisionId] = useFormDraftState<string | null>(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:manual-document-revision`, null)
+  const [manualDriveUrl, setManualDriveUrl] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:manual-document-url`, '')
+  const [manualFileName, setManualFileName] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:manual-document-name`, '')
+  const [manualMimeType, setManualMimeType] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:manual-document-mime`, '')
+  const [manualLabel, setManualLabel] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittal:${submittalId}:manual-document-label`, '')
   const [previewDocument, setPreviewDocument] = useState<SubmittalDocument | null>(null)
   const [previewFailed, setPreviewFailed] = useState(false)
 
@@ -148,7 +149,7 @@ export default function SubmittalDetailPage() {
     else {
       setProjectName(projectResult.data.name)
       setProjectDriveFolderUrl(projectResult.data.drive_folder_url)
-      setFolderUrlDraft(projectResult.data.drive_folder_url || '')
+      setFolderUrlDraftFromServer(projectResult.data.drive_folder_url || '')
     }
 
     if (submittalResult.error) {
@@ -157,7 +158,7 @@ export default function SubmittalDetailPage() {
       const loaded = submittalResult.data as unknown as Submittal
       loaded.submittal_revisions.sort((a, b) => a.revision_number - b.revision_number)
       setSubmittal(loaded)
-      setOverview(toOverviewForm(loaded))
+      setOverviewFromServer(toOverviewForm(loaded))
     }
 
     if (activityResult.error) {
@@ -166,7 +167,7 @@ export default function SubmittalDetailPage() {
       setActivities((activityResult.data || []) as SubmittalActivity[])
     }
     setLoading(false)
-  }, [projectId, submittalId])
+  }, [projectId, submittalId, setFolderUrlDraftFromServer, setOverviewFromServer])
 
   useEffect(() => {
     const timer = window.setTimeout(() => void fetchData(), 0)

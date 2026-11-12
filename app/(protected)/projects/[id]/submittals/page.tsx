@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { hasAnyRole, useAuth } from '@/lib/auth-context'
+import { useFormDraftState } from '@/lib/form-drafts'
 import { supabase } from '@/lib/supabase'
 import {
   BALL_IN_COURT_OPTIONS,
@@ -86,22 +87,22 @@ function daysOutstanding(submittal: Submittal, today: string) {
 export default function SubmittalsPage() {
   const params = useParams()
   const projectId = params?.id as string
-  const { roles } = useAuth()
+  const { roles, user } = useAuth()
   const canManage = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
   const [projectName, setProjectName] = useState('')
   const [submittals, setSubmittals] = useState<Submittal[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
-  const [activeTab, setActiveTab] = useState<FilterTab>('All')
-  const [typeFilter, setTypeFilter] = useState('')
-  const [ballFilter, setBallFilter] = useState('')
-  const [responsibleFilter, setResponsibleFilter] = useState('')
-  const [sortKey, setSortKey] = useState<SortKey>('name')
-  const [sortAscending, setSortAscending] = useState(true)
-  const [showCreateForm, setShowCreateForm] = useState(false)
-  const [form, setForm] = useState<CreateForm>(EMPTY_FORM)
+  const [search, setSearch] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittals:search`, '')
+  const [activeTab, setActiveTab] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittals:filter-tab`, 'All' as FilterTab)
+  const [typeFilter, setTypeFilter] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittals:type-filter`, '')
+  const [ballFilter, setBallFilter] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittals:ball-filter`, '')
+  const [responsibleFilter, setResponsibleFilter] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittals:responsible-filter`, '')
+  const [sortKey, setSortKey] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittals:sort-key`, 'name' as SortKey)
+  const [sortAscending, setSortAscending] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittals:sort-ascending`, true)
+  const [showCreateForm, setShowCreateForm] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittals:create-open`, false)
+  const [form, setForm] = useFormDraftState(user?.id ?? null, `project:${projectId}:submittals:create-form`, EMPTY_FORM)
   const today = localDateString()
 
   const fetchData = useCallback(async () => {

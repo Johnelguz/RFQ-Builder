@@ -4,11 +4,12 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
+import { useFormDraftState } from '@/lib/form-drafts'
 
 export default function LoginPage() {
   const router = useRouter()
   const { user, loading, signIn } = useAuth()
-  const [username, setUsername] = useState('')
+  const [username, setUsername] = useFormDraftState('anonymous', 'login:username', '')
   const [password, setPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [error, setError] = useState<string | null>(null)

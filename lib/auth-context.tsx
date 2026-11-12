@@ -1,9 +1,10 @@
 'use client'
 
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { loginToAuthEmail } from '@/lib/usernames'
+import { clearUserFormDrafts } from '@/lib/form-drafts'
 
 export const APP_ROLES = ['ADMIN', 'RFQ_MANAGER', 'REVIEWER', 'COST_EDITOR', 'VIEWER'] as const
 export type AppRole = (typeof APP_ROLES)[number]
@@ -79,18 +80,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  async function signIn(usernameOrEmail: string, password: string) {
+  const signIn = useCallback(async (usernameOrEmail: string, password: string) => {
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email: loginToAuthEmail(usernameOrEmail),
       password
     })
     return signInError?.message ?? null
-  }
+  }, [])
 
-  async function signOut() {
+  const signOut = useCallback(async () => {
     const { error: signOutError } = await supabase.auth.signOut()
+    if (!signOutError && user) clearUserFormDrafts(user.id)
     return signOutError?.message ?? null
-  }
+  }, [user])
 
   const value = useMemo(() => ({
     user,
@@ -100,7 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     error,
     signIn,
     signOut
-  }), [user, roles, loading, rolesLoading, error])
+  }), [user, roles, loading, rolesLoading, error, signIn, signOut])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

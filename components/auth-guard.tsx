@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect } from 'react'
 import { useState } from 'react'
 import { hasAnyRole, useAuth } from '@/lib/auth-context'
+import { useFormDraftStorageError } from '@/lib/form-drafts'
 
 const roleLabels: Record<string, string> = {
   ADMIN: 'Admin',
@@ -18,6 +19,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const { user, roles, loading, rolesLoading, error, signOut } = useAuth()
   const [signOutError, setSignOutError] = useState<string | null>(null)
+  const draftStorageError = useFormDraftStorageError()
 
   async function handleSignOut() {
     const message = await signOut()
@@ -73,6 +75,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
         </div>
         {signOutError && <p role="alert" className="mx-auto max-w-7xl px-6 pb-2 text-xs text-red-700">{signOutError}</p>}
       </header>
+      {draftStorageError && <p role="alert" className="mx-auto max-w-7xl px-6 pb-2 text-xs text-red-700">{draftStorageError}</p>}
       {children}
     </>
   )

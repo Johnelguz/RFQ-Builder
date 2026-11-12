@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { hasAnyRole, useAuth } from '@/lib/auth-context'
 import { supabase } from '@/lib/supabase'
+import { useFormDraftState } from '@/lib/form-drafts'
 
 const QUOTE_BUCKET = 'project-vendor-quotes'
 const MAX_FILE_SIZE = 20 * 1024 * 1024
@@ -107,7 +108,7 @@ function isMissingSupplierNameColumn(error: { code?: string; message: string }) 
 export default function ProjectQuotesPage() {
   const params = useParams()
   const projectId = params?.id as string
-  const { roles } = useAuth()
+  const { roles, user } = useAuth()
   const canManageQuotes = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
   const [projectName, setProjectName] = useState('')
   const [materials, setMaterials] = useState<Material[]>([])
@@ -116,9 +117,9 @@ export default function ProjectQuotesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [uploadSupplierId, setUploadSupplierId] = useState('')
-  const [uploadCategory, setUploadCategory] = useState('General')
-  const [quoteLabel, setQuoteLabel] = useState('')
+  const [uploadSupplierId, setUploadSupplierId] = useFormDraftState(user?.id ?? null, `project:${projectId}:quotes:supplier`, '')
+  const [uploadCategory, setUploadCategory] = useFormDraftState(user?.id ?? null, `project:${projectId}:quotes:category`, 'General')
+  const [quoteLabel, setQuoteLabel] = useFormDraftState(user?.id ?? null, `project:${projectId}:quotes:label`, '')
   const [quoteFile, setQuoteFile] = useState<File | null>(null)
   const [uploadingQuote, setUploadingQuote] = useState(false)
   const [collapsedQuoteIds, setCollapsedQuoteIds] = useState<Set<string>>(new Set())
@@ -452,7 +453,7 @@ export default function ProjectQuotesPage() {
                 <label className="text-sm font-medium text-gray-700">
                   Quote file
                   <input required type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" onChange={event => setQuoteFile(event.target.files?.[0] || null)} className="mt-1 block w-full rounded border p-2 text-sm" />
-                  <span className="mt-1 block text-xs font-normal text-gray-500">PDF, JPEG, PNG, or WebP; up to 20 MB.</span>
+                  <span className="mt-1 block text-xs font-normal text-gray-500">PDF, JPEG, PNG, or WebP; up to 20 MB. After a reload, choose the file again.</span>
                 </label>
                 <button disabled={uploadingQuote} className="self-end rounded bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
                   {uploadingQuote ? 'Uploading quote…' : 'Upload quote'}

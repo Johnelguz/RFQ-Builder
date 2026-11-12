@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test lib/submittals.test.mjs lib/google-drive.test.mjs"
+    "test": "node --test lib/submittals.test.mjs lib/google-drive.test.mjs lib/form-draft-storage.test.mjs"
   },
   "dependencies": {
     "@google-cloud/documentai": "^10.2.0",

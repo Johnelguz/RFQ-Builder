@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { APP_ROLES, type AppRole, hasAnyRole, useAuth } from '@/lib/auth-context'
+import { useFormDraftState } from '@/lib/form-drafts'
 import { supabase } from '@/lib/supabase'
 
 interface TeamUser {
@@ -22,15 +23,15 @@ const roleLabels: Record<AppRole, string> = {
 }
 
 export default function TeamPage() {
-  const { roles } = useAuth()
+  const { roles, user } = useAuth()
   const isAdmin = hasAnyRole(roles, ['ADMIN'])
   const [users, setUsers] = useState<TeamUser[]>([])
-  const [pendingRoles, setPendingRoles] = useState<Record<string, AppRole[]>>({})
-  const [usernameDrafts, setUsernameDrafts] = useState<Record<string, string>>({})
+  const [pendingRoles, setPendingRoles, setPendingRolesFromServer] = useFormDraftState<Record<string, AppRole[]>>(user?.id ?? null, 'team:pending-roles', {})
+  const [usernameDrafts, setUsernameDrafts, setUsernameDraftsFromServer] = useFormDraftState<Record<string, string>>(user?.id ?? null, 'team:username-drafts', {})
   const [passwordDrafts, setPasswordDrafts] = useState<Record<string, string>>({})
-  const [newUsername, setNewUsername] = useState('')
+  const [newUsername, setNewUsername] = useFormDraftState(user?.id ?? null, 'team:new-username', '')
   const [newPassword, setNewPassword] = useState('')
-  const [inviteRoles, setInviteRoles] = useState<AppRole[]>(['VIEWER'])
+  const [inviteRoles, setInviteRoles] = useFormDraftState<AppRole[]>(user?.id ?? null, 'team:invite-roles', ['VIEWER'])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -66,15 +67,17 @@ export default function TeamPage() {
       const result = await adminRequest('GET')
       const teamUsers = result.users || []
       setUsers(teamUsers)
-      setPendingRoles(Object.fromEntries(teamUsers.map(user => [user.id, user.roles])))
-      setUsernameDrafts(Object.fromEntries(teamUsers.map(user => [user.id, user.username])))
+      const loadedRoles = Object.fromEntries(teamUsers.map(user => [user.id, user.roles]))
+      const loadedUsernames = Object.fromEntries(teamUsers.map(user => [user.id, user.username]))
+      setPendingRolesFromServer(current => ({ ...loadedRoles, ...current }))
+      setUsernameDraftsFromServer(current => ({ ...loadedUsernames, ...current }))
       setTruncated(Boolean(result.truncated))
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to load team users.')
     } finally {
       setLoading(false)
     }
-  }, [adminRequest])
+  }, [adminRequest, setPendingRolesFromServer, setUsernameDraftsFromServer])
 
   useEffect(() => {
     if (!isAdmin) return

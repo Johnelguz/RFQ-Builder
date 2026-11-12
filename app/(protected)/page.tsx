@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { hasAnyRole, useAuth } from '@/lib/auth-context'
+import { useFormDraftState } from '@/lib/form-drafts'
 import { supabase } from '@/lib/supabase'
 import { Archive, ArrowUpRight, CircleCheck, ClipboardList, Gavel, LoaderCircle, Plus, Trash2 } from 'lucide-react'
 
@@ -38,12 +39,12 @@ function fullCurrency(value: number | null) {
 
 export default function Home() {
   const router = useRouter()
-  const { roles } = useAuth()
+  const { roles, user } = useAuth()
   const canCreateProjects = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
   const isAdmin = hasAnyRole(roles, ['ADMIN'])
   const [projects, setProjects] = useState<Project[]>([])
-  const [projectName, setProjectName] = useState('')
-  const [rfqProjectId, setRfqProjectId] = useState('')
+  const [projectName, setProjectName] = useFormDraftState(user?.id ?? null, 'dashboard:project-name', '')
+  const [rfqProjectId, setRfqProjectId] = useFormDraftState(user?.id ?? null, 'dashboard:rfq-project-id', '')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [savingStatusProjectId, setSavingStatusProjectId] = useState<string | null>(null)
@@ -149,6 +150,7 @@ export default function Home() {
       setSaving(false)
       return
     }
+    setProjectName('')
     router.push(`/projects/${data.id}`)
   }
 

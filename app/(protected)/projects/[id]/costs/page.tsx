@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { hasAnyRole, useAuth } from '@/lib/auth-context'
+import { useFormDraftState } from '@/lib/form-drafts'
 import { supabase } from '@/lib/supabase'
 
 const INVOICE_BUCKET = 'project-invoices'
@@ -174,7 +175,7 @@ export default function ProjectCostsPage() {
     ? `collapsed-invoices:v1:${user.id}:${projectId}`
     : null
   const [projectName, setProjectName] = useState('')
-  const [budgetValue, setBudgetValue] = useState('')
+  const [budgetValue, setBudgetValue, setBudgetValueFromServer] = useFormDraftState(user?.id ?? null, `project:${projectId}:costs:budget`, '')
   const [budget, setBudget] = useState<number | null>(null)
   const [budgetSaving, setBudgetSaving] = useState(false)
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -200,8 +201,12 @@ export default function ProjectCostsPage() {
   const [totalDifferenceConfirmed, setTotalDifferenceConfirmed] = useState(false)
   const [openingInvoiceId, setOpeningInvoiceId] = useState<string | null>(null)
   const [invoicePreview, setInvoicePreview] = useState<{ invoice: Invoice; url: string } | null>(null)
-  const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null)
-  const [invoiceHeaderDraft, setInvoiceHeaderDraft] = useState<InvoiceHeaderDraft | null>(null)
+  const [editingInvoiceId, setEditingInvoiceId] = useFormDraftState<string | null>(user?.id ?? null, `project:${projectId}:costs:editing-invoice`, null)
+  const [invoiceHeaderDraft, setInvoiceHeaderDraft] = useFormDraftState<InvoiceHeaderDraft | null>(
+    user?.id ?? null,
+    `project:${projectId}:costs:invoice-header`,
+    null
+  )
   const [deletingInvoiceId, setDeletingInvoiceId] = useState<string | null>(null)
   const [collapsedInvoiceIds, setCollapsedInvoiceIds] = useState<Set<string>>(() => new Set())
   const [restoredCollapsedInvoicesKey, setRestoredCollapsedInvoicesKey] = useState<string | null>(null)
@@ -230,14 +235,14 @@ export default function ProjectCostsPage() {
       setProjectName(projectResult.data?.name || '')
       const currentBudget = projectResult.data?.material_budget
       setBudget(currentBudget == null ? null : Number(currentBudget))
-      setBudgetValue(currentBudget == null ? '' : String(currentBudget))
+      setBudgetValueFromServer(currentBudget == null ? '' : String(currentBudget))
       setSuppliers((supplierResult.data || []) as Supplier[])
       setInvoices((invoiceResult.data || []) as unknown as Invoice[])
       setError(null)
     } catch (loadError) {
       setError(`Unable to load project cost data: ${loadError instanceof Error ? loadError.message : 'Unexpected network error.'}`)
     }
-  }, [projectId])
+  }, [projectId, setBudgetValueFromServer])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -287,10 +292,13 @@ export default function ProjectCostsPage() {
 
     const timer = window.setTimeout(() => {
       try {
-        const saved = window.sessionStorage.getItem(draftStorageKey)
+        const legacySaved = window.sessionStorage.getItem(draftStorageKey)
+        const saved = window.localStorage.getItem(draftStorageKey) ?? legacySaved
+        if (legacySaved !== null) window.sessionStorage.removeItem(draftStorageKey)
         if (saved) {
           const draft: unknown = JSON.parse(saved)
           if (!isSavedInvoiceDraft(draft) || !draft.filePath.startsWith(`${projectId}/`)) {
+            window.localStorage.removeItem(draftStorageKey)
             window.sessionStorage.removeItem(draftStorageKey)
             setError('The saved invoice draft was invalid and has been cleared. Upload the invoice again to continue.')
           } else {
@@ -324,6 +332,7 @@ export default function ProjectCostsPage() {
     if (!draftStorageKey || restoredDraftKey !== draftStorageKey) return
     try {
       if (!uploadedFilePath) {
+        window.localStorage.removeItem(draftStorageKey)
         window.sessionStorage.removeItem(draftStorageKey)
         return
       }
@@ -342,9 +351,10 @@ export default function ProjectCostsPage() {
         extractionWarnings,
         draftItems
       }
-      window.sessionStorage.setItem(draftStorageKey, JSON.stringify(draft))
+      window.localStorage.setItem(draftStorageKey, JSON.stringify(draft))
+      window.sessionStorage.removeItem(draftStorageKey)
     } catch (saveDraftError) {
-      const message = `Unable to preserve the invoice draft in this browser tab: ${saveDraftError instanceof Error ? saveDraftError.message : 'Browser storage is unavailable.'}`
+      const message = `Unable to preserve the invoice draft in this browser: ${saveDraftError instanceof Error ? saveDraftError.message : 'Browser storage is unavailable.'}`
       window.setTimeout(() => setError(message), 0)
     }
   }, [

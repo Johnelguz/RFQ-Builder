@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { hasAnyRole, useAuth } from '@/lib/auth-context'
+import { useFormDraftState } from '@/lib/form-drafts'
 
 interface RFQHistoryItem {
   id: string
@@ -36,10 +37,10 @@ export default function RFQHistoryPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const projectId = searchParams.get('projectId')
-  const { roles } = useAuth()
+  const { roles, user } = useAuth()
   const canManageRfqs = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
   const [history, setHistory] = useState<RFQHistoryItem[]>([])
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchQuery, setSearchQuery] = useFormDraftState(user?.id ?? null, 'history:search', '')
   const [loading, setLoading] = useState<boolean>(true)
   const [expandedBatchIds, setExpandedBatchIds] = useState<Set<string>>(() => new Set())
   const normalizedSearchQuery = searchQuery.trim().toLowerCase()

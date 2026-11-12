@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { hasAnyRole, useAuth } from '@/lib/auth-context'
+import { useFormDraftState } from '@/lib/form-drafts'
 
 interface Material {
   id: string
@@ -110,8 +111,8 @@ function TakeoffDashboard() {
   const canManageRfqs = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
   
   const [projectName, setProjectName] = useState<string>('')
-  const [projectNameDraft, setProjectNameDraft] = useState('')
-  const [editingProjectName, setEditingProjectName] = useState(false)
+  const [projectNameDraft, setProjectNameDraft] = useFormDraftState(user?.id ?? null, `project:${projectId}:name-draft`, '')
+  const [editingProjectName, setEditingProjectName] = useFormDraftState(user?.id ?? null, `project:${projectId}:name-edit-open`, false)
   const [savingProjectName, setSavingProjectName] = useState(false)
   const [projectNameError, setProjectNameError] = useState<string | null>(null)
   const [materials, setMaterials] = useState<Material[]>([])
@@ -211,11 +212,13 @@ function TakeoffDashboard() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       try {
-        const saved = window.sessionStorage.getItem(rfqWorkflowStorageKey)
+        const legacySaved = window.sessionStorage.getItem(rfqWorkflowStorageKey)
+        const saved = window.localStorage.getItem(rfqWorkflowStorageKey) ?? legacySaved
+        if (legacySaved !== null) window.sessionStorage.removeItem(rfqWorkflowStorageKey)
         if (saved) {
           const workflow: unknown = JSON.parse(saved)
           if (!isSavedRfqWorkflow(workflow)) {
-            window.sessionStorage.removeItem(rfqWorkflowStorageKey)
+            window.localStorage.removeItem(rfqWorkflowStorageKey)
             alert('The saved RFQ dispatch session was invalid and has been cleared.')
           } else {
             setShowRfqWizard(workflow.showRfqWizard)
@@ -237,7 +240,7 @@ function TakeoffDashboard() {
     if (restoredRfqWorkflowProjectId !== projectId) return
     try {
       if (!showRfqWizard && dispatchedSupplierIds.length === 0 && wizardStep === 'PROJECT_NAME') {
-        window.sessionStorage.removeItem(rfqWorkflowStorageKey)
+        window.localStorage.removeItem(rfqWorkflowStorageKey)
         return
       }
       const workflow: SavedRfqWorkflow = {
@@ -247,7 +250,7 @@ function TakeoffDashboard() {
         dispatchedSupplierIds,
         rfqName
       }
-      window.sessionStorage.setItem(rfqWorkflowStorageKey, JSON.stringify(workflow))
+      window.localStorage.setItem(rfqWorkflowStorageKey, JSON.stringify(workflow))
     } catch (saveError) {
       alert(`Unable to preserve the RFQ dispatch session: ${saveError instanceof Error ? saveError.message : 'Browser storage is unavailable.'}`)
     }
@@ -498,9 +501,9 @@ function TakeoffDashboard() {
       if (clearDispatchHistory || dispatchedSupplierIds.length === 0) {
         setDispatchedSupplierIds([])
         setWizardStep('PROJECT_NAME')
-        window.sessionStorage.removeItem(rfqWorkflowStorageKey)
+        window.localStorage.removeItem(rfqWorkflowStorageKey)
       } else {
-        window.sessionStorage.setItem(rfqWorkflowStorageKey, JSON.stringify({
+        window.localStorage.setItem(rfqWorkflowStorageKey, JSON.stringify({
           version: 1,
           showRfqWizard: false,
           wizardStep,
@@ -631,7 +634,7 @@ function TakeoffDashboard() {
       : [...dispatchedSupplierIds, sup.id]
     setDispatchedSupplierIds(nextDispatchedSupplierIds)
     try {
-      window.sessionStorage.setItem(rfqWorkflowStorageKey, JSON.stringify({
+      window.localStorage.setItem(rfqWorkflowStorageKey, JSON.stringify({
         version: 1,
         showRfqWizard: true,
         wizardStep: 'SUPPLIER_LIST',

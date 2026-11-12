@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { hasAnyRole, useAuth } from '@/lib/auth-context'
+import { useFormDraftState } from '@/lib/form-drafts'
 
 interface Supplier {
   id: string
@@ -15,12 +16,12 @@ interface Supplier {
 }
 
 export default function SuppliersPage() {
-  const { roles } = useAuth()
+  const { roles, user } = useAuth()
   const canManageSuppliers = hasAnyRole(roles, ['ADMIN', 'RFQ_MANAGER'])
   const isAdmin = hasAnyRole(roles, ['ADMIN'])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
-  const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null)
-  const [form, setForm] = useState({
+  const [editingSupplierId, setEditingSupplierId] = useFormDraftState<string | null>(user?.id ?? null, 'suppliers:editing-id', null)
+  const [form, setForm] = useFormDraftState(user?.id ?? null, 'suppliers:form', {
     company_name: '',
     contact_name: '',
     email: '',

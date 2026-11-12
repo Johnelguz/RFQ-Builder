@@ -75,6 +75,10 @@ After the core submittal migration, apply [`supabase/migrations/20261107173000_s
 
 The current submittal phase supports manual send tracking and Drive document links. Gmail draft confirmation, follow-ups, RFIs, and import/export remain planned for later phases. The existing RFQ compose-URL feature does not use Gmail scopes.
 
+## Unsaved form drafts
+
+Editable non-password form values are saved in the current browser's local storage and restored after app navigation, reloads, or browser restarts. Drafts are separated by signed-in account and cleared when that account signs out. Passwords and browser file selections are not saved; after a reload, select an upload file again. Local browser drafts are not encrypted by the app, so sign out when using a shared device.
+
 ## Roles
 
 Roles can be combined:
