@@ -143,14 +143,17 @@ export function GoogleDrivePickerButton({
         loadScript('google-identity-services', 'https://accounts.google.com/gsi/client'),
         loadScript('google-picker-api', 'https://apis.google.com/js/api.js')
       ])
-      const identity = window.google
       const gapi = window.gapi
-      if (!identity || !gapi) throw new Error('Google Drive Picker did not initialize.')
+      if (!window.google || !gapi) throw new Error('Google Drive Picker did not initialize.')
 
-      const accessToken = await requestDriveToken(identity, clientId)
       await loadPickerApi(gapi)
+      const identity = window.google
+      if (!identity) throw new Error('Google Identity Services did not initialize.')
       const pickerApi = identity.picker
-      if (!pickerApi) throw new Error('Google Drive Picker is unavailable.')
+      if (!pickerApi || typeof pickerApi.PickerBuilder !== 'function') {
+        throw new Error('Google Picker loaded without its PickerBuilder. Confirm the Google Picker API is enabled for the same Cloud project as your OAuth client.')
+      }
+      const accessToken = await requestDriveToken(identity, clientId)
 
       await new Promise<void>((resolve, reject) => {
         const picker = new pickerApi.PickerBuilder()
