@@ -4,7 +4,6 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { hasAnyRole, useAuth } from '@/lib/auth-context'
-import { GoogleDrivePickerButton } from '@/components/google-drive-picker'
 import { supabase } from '@/lib/supabase'
 import {
   driveFileUrl,
@@ -602,10 +601,6 @@ export default function SubmittalDetailPage() {
                   </div>
                   {canManage && revision.status !== 'Void' && (
                     <div className="flex flex-wrap items-center gap-3">
-                      <GoogleDrivePickerButton
-                        disabled={saving}
-                        onSelect={file => handleAttachDocument(revision.id, file)}
-                      />
                       <button
                         type="button"
                         onClick={() => { setError(null); setManualRevisionId(current => current === revision.id ? null : revision.id) }}
